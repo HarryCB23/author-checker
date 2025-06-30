@@ -11,6 +11,8 @@ st.set_page_config(layout="wide", page_title="Author Quality Evaluator")
 try:
     API_USERNAME = st.secrets["API_USERNAME"]
     API_PASSWORD = st.secrets["API_PASSWORD"]
+    # You can add a success message here if desired, but for a clean UI,
+    # it's often better to assume success unless an error is caught.
 except KeyError as e:
     st.error(f"Missing API secret: {e}. Please configure secrets in Streamlit Cloud dashboard.")
     st.stop() # Stop the app if secrets are missing
@@ -19,7 +21,7 @@ DATAFORSEO_ORGANIC_URL = "https://api.dataforseo.com/v3/serp/google/organic/live
 
 # Define a list of major UK publisher domains for "Associated Brands" check
 UK_PUBLISHER_DOMAINS = [
-    "thetimes.com", # Updated to .com
+    "thetimes.com",
     "theguardian.com",
     "bbc.co.uk",
     "express.co.uk",
@@ -29,7 +31,7 @@ UK_PUBLISHER_DOMAINS = [
     "mirror.co.uk",
     "thesun.co.uk",
     "metro.co.uk",
-    "gbnews.com" # Added GB News
+    "gbnews.com"
 ]
 # Exclude these generic domains from "Associated Brands"
 EXCLUDED_GENERIC_DOMAINS_REGEX = [
@@ -173,7 +175,8 @@ def calculate_quality_score(
     x_followers: int,
     instagram_followers: int,
     tiktok_followers: int,
-    matched_uk_publishers_count: int, # Based on new function output
+    facebook_followers: int, # New parameter
+    matched_uk_publishers_count: int,
     is_competitor: bool
 ) -> int:
     """Calculates a quality score based on various signals."""
@@ -187,9 +190,9 @@ def calculate_quality_score(
     # Scale scholar citations: 1 point per citation, capped at 10 points
     score += min(scholar_citations_count, 10)
 
-    # Social followers: 1 point per 10k followers across all platforms, capped at 15 points
-    total_social_followers = linkedin_followers + x_followers + instagram_followers + tiktok_followers
-    score += min(total_social_followers // 10000, 15)
+    # Social followers: 1 point per 10k followers across all platforms, capped at 20 points (increased cap)
+    total_social_followers = linkedin_followers + x_followers + instagram_followers + tiktok_followers + facebook_followers
+    score += min(total_social_followers // 10000, 20)
 
     # Points for writing for major UK publishers (2 points per publisher, capped at 10 points)
     score += min(matched_uk_publishers_count * 2, 10)
@@ -198,18 +201,21 @@ def calculate_quality_score(
 
     return max(0, score) # Ensure score doesn't go negative
 
-# --- Streamlit UI Layout ---
+# --- Main Page Title ---
 st.title("✍️ The Telegraph Recommended: Author Quality Evaluator")
 st.markdown("---") # Separator after title
 st.markdown("""
 This tool helps assess the perceived authority and expertise of authors based on key online signals,
 supporting the recruitment of high-quality freelancers for The Telegraph Recommended.
 """)
+# --- END Main Page Title ---
+
 
 # --- Sidebar ---
 with st.sidebar:
     st.header("Author Evaluation & Settings")
 
+    # --- Individual Author Evaluation (moved to sidebar) ---
     st.subheader("Individual Author Evaluation")
     st.markdown("Enter details to analyze a single author.")
     single_author_name = st.text_input("Author Name:", help="Full name of the author.")
@@ -230,8 +236,20 @@ with st.sidebar:
     with col_social2:
         single_x_followers = st.number_input("X (Twitter):", min_value=0, value=0, step=100)
         single_tiktok_followers = st.number_input("TikTok:", min_value=0, value=0, step=100)
+        single_facebook_followers = st.number_input("Facebook:", min_value=0, value=0, step=100) # New Facebook field
 
-    if st.button("Analyze Single Author"):
+    # Define competitor_authors_list BEFORE it's used in the button logic
+    st.markdown("---")
+    st.subheader("Competitor Authors List")
+    competitor_authors_raw = st.text_area(
+        "Enter competitor author names (one per line):",
+        value="Jane Doe\nJohn Smith" # Example placeholder
+    )
+    competitor_authors_list = [name.strip() for name in competitor_authors_raw.split('\n') if name.strip()]
+    st.caption(f"Loaded {len(competitor_authors_list)} competitor authors for all checks.")
+
+
+    if st.button("Analyze Single Author", use_container_width=True): # Use container width for better fit
         if single_author_name:
             with st.spinner(f"Analyzing '{single_author_name}'... This may take a moment due to API calls."):
                 kp_exists, kp_details = check_knowledge_panel(single_author_name)
@@ -239,21 +257,23 @@ with st.sidebar:
                 topical_authority_serp_count = get_topical_authority_serp_count(single_author_name, single_keyword_topic)
                 all_associated_domains, matched_uk_publishers = get_author_associated_brands(single_author_name)
                 scholar_citations_count = check_google_scholar_citations(single_author_name)
-                is_competitor = check_competitor_author(single_author_name, competitor_authors_list)
+                is_competitor = check_competitor_author(single_author_name, competitor_authors_list) # competitor_authors_list is now defined above the button
 
                 quality_score = calculate_quality_score(
                     kp_exists, wiki_exists, topical_authority_serp_count,
                     scholar_citations_count, single_linkedin_followers, single_x_followers,
-                    single_instagram_followers, single_tiktok_followers, len(matched_uk_publishers),
+                    single_instagram_followers, single_tiktok_followers, single_facebook_followers, # Pass new Facebook follower count
+                    len(matched_uk_publishers),
                     is_competitor
                 )
 
-                st.markdown("---") # Visual separator in sidebar
+                st.markdown("---") # Visual separator in sidebar for results
                 st.subheader(f"Results for '{single_author_name}'")
                 
+                # Using st.metric for key numerical values
                 st.metric(label="Quality Score", value=quality_score)
-                if quality_score >= 20: st.success("Strong authority signals! Highly recommended.")
-                elif quality_score >= 10: st.info("Good authority signals. Recommended.")
+                if quality_score >= 30: st.success("Exceptional authority signals! Highly recommended.") # Adjusted thresholds for new score range
+                elif quality_score >= 15: st.info("Good authority signals. Recommended.")
                 else: st.warning("Limited strong authority signals. Further manual review recommended.")
 
                 st.markdown(f"**Knowledge Panel:** {'✅ Yes' if kp_exists else '❌ No'} ({kp_details})")
@@ -278,21 +298,12 @@ with st.sidebar:
                 st.markdown(f"- X (Twitter): {single_x_followers:,}")
                 st.markdown(f"- Instagram: {single_instagram_followers:,}")
                 st.markdown(f"- TikTok: {single_tiktok_followers:,}")
+                st.markdown(f"- Facebook: {single_facebook_followers:,}") # Display new Facebook followers
 
         else:
             st.warning("Please enter an author name to analyze.")
 
-    st.markdown("---")
-    st.subheader("Competitor Authors List")
-    competitor_authors_raw = st.text_area(
-        "Enter competitor author names (one per line):",
-        value="Jane Doe\nJohn Smith" # Example placeholder
-    )
-    competitor_authors_list = [name.strip() for name in competitor_authors_raw.split('\n') if name.strip()]
-
-    st.caption(f"Loaded {len(competitor_authors_list)} competitor authors.")
-
-# --- Main Content Area ---
+# --- Main Content Area (Bulk Evaluation) ---
 st.header("Bulk Author Evaluation (CSV Upload)")
 st.markdown("""
 Upload a CSV file with the following columns:
@@ -303,6 +314,7 @@ Upload a CSV file with the following columns:
 - **X_Followers** (optional): Manual input for X (Twitter) follower count.
 - **Instagram_Followers** (optional): Manual input for Instagram follower count.
 - **TikTok_Followers** (optional): Manual input for TikTok follower count.
+- **Facebook_Followers** (optional): Manual input for Facebook follower count.
 """)
 uploaded_file = st.file_uploader("Choose a CSV file", type=["csv"])
 
@@ -316,7 +328,7 @@ if uploaded_file is not None:
         st.write("Preview of uploaded data:")
         st.dataframe(data.head())
 
-        if st.button("Run Bulk Analysis"):
+        if st.button("Run Bulk Analysis", use_container_width=True): # Use container width for better fit
             results = []
             total_authors = len(data)
             progress_bar = st.progress(0)
@@ -329,6 +341,7 @@ if uploaded_file is not None:
                 x_followers = int(row["X_Followers"]) if "X_Followers" in data.columns and pd.notna(row["X_Followers"]) else 0
                 instagram_followers = int(row["Instagram_Followers"]) if "Instagram_Followers" in data.columns and pd.notna(row["Instagram_Followers"]) else 0
                 tiktok_followers = int(row["TikTok_Followers"]) if "TikTok_Followers" in data.columns and pd.notna(row["TikTok_Followers"]) else 0
+                facebook_followers = int(row["Facebook_Followers"]) if "Facebook_Followers" in data.columns and pd.notna(row["Facebook_Followers"]) else 0 # New Facebook from CSV
                 author_url = str(row["Author_URL"]).strip() if "Author_URL" in data.columns and pd.notna(row["Author_URL"]) else ""
 
 
@@ -347,7 +360,8 @@ if uploaded_file is not None:
                 quality_score = calculate_quality_score(
                     kp_exists, wiki_exists, topical_authority_serp_count,
                     scholar_citations_count, linkedin_followers, x_followers,
-                    instagram_followers, tiktok_followers, len(matched_uk_publishers),
+                    instagram_followers, tiktok_followers, facebook_followers, # Pass new Facebook follower count
+                    len(matched_uk_publishers),
                     is_competitor
                 )
 
@@ -367,6 +381,7 @@ if uploaded_file is not None:
                     "Manual_X_Followers": x_followers,
                     "Manual_Instagram_Followers": instagram_followers,
                     "Manual_TikTok_Followers": tiktok_followers,
+                    "Manual_Facebook_Followers": facebook_followers, # New Facebook for CSV
                     "Is_Competitor_Author": "Yes" if is_competitor else "No",
                     "Quality_Score": quality_score
                 })
@@ -377,7 +392,7 @@ if uploaded_file is not None:
             st.subheader("Bulk Analysis Results:")
             
             # --- Visualisation of Bulk Results ---
-            st.markdown("### Top-Level Summary")
+            st.markdown("### High-Level Summary")
             col_sum1, col_sum2, col_sum3 = st.columns(3)
             with col_sum1:
                 st.metric("Total Authors Analyzed", total_authors)
@@ -388,9 +403,29 @@ if uploaded_file is not None:
                 wiki_count = results_df["Has_Wikipedia_Page"].value_counts().get("Yes", 0)
                 st.metric("Authors with Wikipedia Pages", wiki_count)
             
+            st.markdown("---")
             st.markdown("### Detailed Results Table")
-            # Using st.dataframe for interactive table
-            st.dataframe(results_df)
+            # You can add styling here for better readability
+            def highlight_score(s):
+                if s['Quality_Score'] >= 30:
+                    return ['background-color: #d4edda'] * len(s) # Light green
+                elif s['Quality_Score'] >= 15:
+                    return ['background-color: #ffeeba'] * len(s) # Light yellow
+                else:
+                    return ['background-color: #f8d7da'] * len(s) # Light red
+            
+            def highlight_yes_no(s):
+                if s == 'Yes':
+                    return 'background-color: #e0ffe0' # Very light green
+                elif s == 'No':
+                    return 'background-color: #fff0f0' # Very light red
+                return ''
+
+            styled_df = results_df.style \
+                .apply(highlight_score, axis=1) \
+                .applymap(highlight_yes_no, subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page', 'Is_Competitor_Author'])
+
+            st.dataframe(styled_df, use_container_width=True)
 
             # Add a download button for the results
             csv_output = results_df.to_csv(index=False).encode('utf-8')
