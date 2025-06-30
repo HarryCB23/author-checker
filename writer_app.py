@@ -272,7 +272,7 @@ with st.sidebar:
                         "LinkedIn_Followers": f"{single_linkedin_followers:,}",
                         "X_Followers": f"{single_x_followers:,}",
                         "Instagram_Followers": f"{single_instagram_followers:,}",
-                        "TikTok_Followers": f"{tiktok_followers:,}",
+                        "TikTok_Followers": f"{single_tiktok_followers:,}",
                         "Facebook_Followers": f"{single_facebook_followers:,}",
                         "KP_Details": kp_details, # For more detail if needed, could be hidden in expander
                         "Wikipedia_Details": wiki_details # For more detail
@@ -329,6 +329,7 @@ st.markdown("---") # Separator for results section
 if st.session_state['triggered_single_analysis'] and st.session_state['single_author_display_results'] is not None:
     st.subheader("Individual Author Analysis Results")
     
+    # Define styling functions here to ensure they are properly scoped for single display
     def highlight_score_color_row(s):
         score_val = s['Quality_Score'].iloc[0] # Quality_Score is already int
         if score_val >= 30:
@@ -360,60 +361,62 @@ if st.session_state['triggered_single_analysis'] and st.session_state['single_au
 elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data_to_process'] is not None:
     st.subheader("Bulk Author Analysis Results")
     
-    # Process the data here (it's triggered by the button, so this runs on next script execution)
     bulk_data = st.session_state['bulk_data_to_process']
     results = []
     total_authors = len(bulk_data)
     
-    progress_bar = st.progress(0)
-    status_text = st.empty() 
+    # Placeholder for status/progress
+    st_progress_placeholder = st.empty() 
+    st_spinner_placeholder = st.empty() # Placeholder for a spinner during bulk processing
 
-    for index, row in bulk_data.iterrows():
-        author = str(row["Author"]).strip()
-        keyword = str(row["Keyword"]).strip() if "Keyword" in bulk_data.columns and pd.notna(row["Keyword"]) else ""
-        linkedin_followers = int(row["LinkedIn_Followers"]) if "LinkedIn_Followers" in bulk_data.columns and pd.notna(row["LinkedIn_Followers"]) else 0
-        x_followers = int(row["X_Followers"]) if "X_Followers" in bulk_data.columns and pd.notna(row["X_Followers"]) else 0
-        instagram_followers = int(row["Instagram_Followers"]) if "Instagram_Followers" in bulk_data.columns and pd.notna(row["Instagram_Followers"]) else 0
-        tiktok_followers = int(row["TikTok_Followers"]) if "TikTok_Followers" in bulk_data.columns and pd.notna(row["TikTok_Followers"]) else 0
-        facebook_followers = int(row["Facebook_Followers"]) if "Facebook_Followers" in bulk_data.columns and pd.notna(row["Facebook_Followers"]) else 0
-        author_url = str(row["Author_URL"]).strip() if "Author_URL" in bulk_data.columns and pd.notna(row["Author_URL"]) else ""
+    with st_spinner_placeholder.container(): # Use a container for the spinner and text
+        with st.spinner("Processing your bulk request... This may take some time due to API calls."):
+            for index, row in bulk_data.iterrows():
+                author = str(row["Author"]).strip()
+                keyword = str(row["Keyword"]).strip() if "Keyword" in bulk_data.columns and pd.notna(row["Keyword"]) else ""
+                linkedin_followers = int(row.get("LinkedIn_Followers", 0)) if pd.notna(row.get("LinkedIn_Followers")) else 0
+                x_followers = int(row.get("X_Followers", 0)) if pd.notna(row.get("X_Followers")) else 0
+                instagram_followers = int(row.get("Instagram_Followers", 0)) if pd.notna(row.get("Instagram_Followers")) else 0
+                tiktok_followers = int(row.get("TikTok_Followers", 0)) if pd.notna(row.get("TikTok_Followers")) else 0
+                facebook_followers = int(row.get("Facebook_Followers", 0)) if pd.notna(row.get("Facebook_Followers")) else 0
+                author_url = str(row["Author_URL"]).strip() if "Author_URL" in bulk_data.columns and pd.notna(row["Author_URL"]) else ""
 
-        status_text.text(f"Processing: {author} ({index + 1}/{total_authors})")
+                st_progress_placeholder.text(f"Processing: {author} ({index + 1}/{total_authors})")
 
-        # API Calls
-        kp_exists, kp_details = check_knowledge_panel(author)
-        wiki_exists, wiki_details = check_wikipedia(author)
-        topical_authority_serp_count = get_topical_authority_serp_count(author, keyword)
-        all_associated_domains, matched_uk_publishers = get_author_associated_brands(author)
-        scholar_citations_count = check_google_scholar_citations(author)
-        
-        quality_score = calculate_quality_score(
-            kp_exists, wiki_exists, topical_authority_serp_count,
-            scholar_citations_count, linkedin_followers, x_followers,
-            instagram_followers, tiktok_followers, facebook_followers,
-            len(matched_uk_publishers)
-        )
+                # API Calls
+                kp_exists, kp_details = check_knowledge_panel(author)
+                wiki_exists, wiki_details = check_wikipedia(author)
+                topical_authority_serp_count = get_topical_authority_serp_count(author, keyword)
+                all_associated_domains, matched_uk_publishers = get_author_associated_brands(author)
+                scholar_citations_count = check_google_scholar_citations(author)
+                
+                quality_score = calculate_quality_score(
+                    kp_exists, wiki_exists, topical_authority_serp_count,
+                    scholar_citations_count, linkedin_followers, x_followers,
+                    instagram_followers, tiktok_followers, facebook_followers,
+                    len(matched_uk_publishers)
+                )
 
-        results.append({
-            "Author": author,
-            "Keyword": keyword,
-            "Author_URL": author_url,
-            "Quality_Score": quality_score, # Keep as int for styling to work smoothly
-            "Has_Knowledge_Panel": "✅ Yes" if kp_exists else "❌ No",
-            "Has_Wikipedia_Page": "✅ Yes" if wiki_exists else "❌ No",
-            "Topical_Authority_SERP_Count": f"{topical_authority_serp_count:,}",
-            "Scholar_Citations_Count": f"{scholar_citations_count:,}",
-            "Matched_UK_Publishers": ", ".join(matched_uk_publishers) if matched_uk_publishers else "None",
-            "All_Associated_Domains": ", ".join(all_associated_domains),
-            "LinkedIn_Followers": f"{linkedin_followers:,}",
-            "X_Followers": f"{x_followers:,}",
-            "Instagram_Followers": f"{instagram_followers:,}",
-            "TikTok_Followers": f"{tiktok_followers:,}",
-            "Facebook_Followers": f"{facebook_followers:,}",
-            "KP_Details": kp_details,
-            "Wikipedia_Details": wiki_details
-        })
-        time.sleep(1) # Small delay to be mindful of API rate limits and display updates
+                results.append({
+                    "Author": author,
+                    "Keyword": keyword,
+                    "Author_URL": author_url,
+                    "Quality_Score": quality_score, # Keep as int for styling to work smoothly
+                    "Has_Knowledge_Panel": "✅ Yes" if kp_exists else "❌ No",
+                    "Has_Wikipedia_Page": "✅ Yes" if wiki_exists else "❌ No",
+                    "Topical_Authority_SERP_Count": f"{topical_authority_serp_count:,}",
+                    "Scholar_Citations_Count": f"{scholar_citations_count:,}",
+                    "Matched_UK_Publishers": ", ".join(matched_uk_publishers) if matched_uk_publishers else "None",
+                    "All_Associated_Domains": ", ".join(all_associated_domains),
+                    "LinkedIn_Followers": f"{linkedin_followers:,}",
+                    "X_Followers": f"{x_followers:,}",
+                    "Instagram_Followers": f"{instagram_followers:,}",
+                    "TikTok_Followers": f"{tiktok_followers:,}",
+                    "Facebook_Followers": f"{facebook_followers:,}",
+                    "KP_Details": kp_details,
+                    "Wikipedia_Details": wiki_details
+                })
+                time.sleep(1) # Small delay to be mindful of API rate limits and display updates
 
     results_df = pd.DataFrame(results)
     st.session_state['bulk_analysis_results_df'] = results_df # Store for display
@@ -439,27 +442,21 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
     
     # Define styling functions here to ensure they are accessible
     def highlight_score_color_cell(val):
-        # Apply only to the Quality_Score column itself
         score_val = int(val) 
         if score_val >= 30:
-            return 'background-color: #d4edda' # Light green
+            return 'background-color: #d4edda' 
         elif score_val >= 15:
-            return 'background-color: #ffeeba' # Light yellow
+            return 'background-color: #ffeeba' 
         else:
-            return 'background-color: #f8d7da' # Light red
+            return 'background-color: #f8d7da' 
 
     def highlight_tick_cross_bg_cell(val):
         if '✅' in str(val):
-            return 'background-color: #e0ffe0' # Very light green
+            return 'background-color: #e0ffe0' 
         elif '❌' in str(val):
-            return 'background-color: #fff0f0' # Very light red
+            return 'background-color: #fff0f0' 
         return ''
 
-    # Apply styling
-    # Note: applymap is for cell-wise. For row-wise apply, use .apply(func, axis=1) on the whole row.
-    # We will use applymap for individual cells, and rely on the Quality_Score being a single cell value for its highlighting.
-    
-    # For Quality_Score column, apply cell-wise coloring
     styled_df = results_df.style \
         .map(highlight_score_color_cell, subset=['Quality_Score']) \
         .applymap(highlight_tick_cross_bg_cell, subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page']) \
@@ -467,9 +464,8 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
                        'LinkedIn_Followers', 'X_Followers', 'Instagram_Followers',
                        'TikTok_Followers', 'Facebook_Followers'], formatter='{:}')
 
-    st.dataframe(styled_df, use_container_width=True, height=500) # Added height for scrollability
+    st.dataframe(styled_df, use_container_width=True, height=500) 
 
-    # Add a download button for the results
     csv_output = results_df.to_csv(index=False).encode('utf-8')
     st.download_button(
         label="Download Results as CSV",
@@ -479,16 +475,9 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
         help="Download the analysis results as a CSV file."
     )
     st_progress_placeholder.empty() # Clear the processing message
-    st.success("Bulk analysis complete!")
+    st_success_placeholder = st.empty() # Placeholder for success message
+    st_success_placeholder.success("Bulk analysis complete!")
 
 # If neither analysis has been triggered yet, show an initial message
-elif not st.session_state['triggered_single_analysis'] and not st.session_state['triggered_bulk_analysis']:
-    st.info("Use the sidebar to input author details for individual analysis, or upload a CSV for bulk processing. Results will appear here.")
 else:
-    # This else block handles the brief moment when a button is clicked,
-    # the app reruns, but results are not yet processed for display.
-    # It provides a continuous spinner.
-    with st.spinner("Processing your request... Please wait."):
-        # This spinner will display while the main processing loop runs in the next rerun
-        # or if the app is just starting up after a trigger.
-        pass # The actual processing happens in the blocks above
+    st.info("Use the sidebar to input author details for individual analysis, or upload a CSV for bulk processing. Results will appear here.")
