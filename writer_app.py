@@ -160,15 +160,18 @@ def get_author_associated_brands(author: str) -> tuple[list[str], list[str]]:
     if data and "tasks" in data and data["tasks"]:
         for task in data["tasks"]:
             if "result" in task and task["result"]:
-                for result in task["items"]: # Changed to items directly from result, assuming structure
-                    if result.get("type") == "organic" and "domain" in result:
-                        domain = result["domain"]
-                        # Check against generic exclusions
-                        if not any(re.search(pattern, domain) for pattern in EXCLUDED_GENERIC_DOMAINS_REGEX):
-                            all_associated_domains.add(domain)
-                        # Check against specific UK publishers
-                        if domain in UK_PUBLISHER_DOMAINS:
-                            matched_uk_publishers.add(domain)
+                # Iterate through the actual results within the 'result' list
+                for result_item in task["result"]: # Renamed to result_item for clarity
+                    if "items" in result_item: # Check if 'items' array is in this result_item
+                        for item in result_item["items"]: # Now iterate through the actual organic items
+                            if item.get("type") == "organic" and "domain" in item:
+                                domain = item["domain"]
+                                # Check against generic exclusions
+                                if not any(re.search(pattern, domain) for pattern in EXCLUDED_GENERIC_DOMAINS_REGEX):
+                                    all_associated_domains.add(domain)
+                                # Check against specific UK publishers
+                                if domain in UK_PUBLISHER_DOMAINS:
+                                    matched_uk_publishers.add(domain)
 
     return sorted(list(all_associated_domains)), sorted(list(matched_uk_publishers))
 
@@ -410,11 +413,12 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
             for index, row in bulk_data.iterrows():
                 author = str(row["Author"]).strip()
                 keyword = str(row["Keyword"]).strip() if "Keyword" in bulk_data.columns and pd.notna(row["Keyword"]) else ""
-                linkedin_followers = int(row.get("LinkedIn_Followers", 0)) if pd.notna(row.get("LinkedIn_Followers")) else 0
-                x_followers = int(row.get("X_Followers", 0)) if pd.notna(row.get("X_Followers")) else 0
-                instagram_followers = int(row.get("Instagram_Followers", 0)) if pd.notna(row.get("Instagram_Followers")) else 0
-                tiktok_followers = int(row.get("TikTok_Followers", 0)) if pd.notna(row.get("TikTok_Followers")) else 0
-                facebook_followers = int(row.get("Facebook_Followers", 0)) if pd.notna(row.get("Facebook_Followers")) else 0
+                # Ensure all follower variables are always defined using .get() with default 0
+                linkedin_followers = int(row.get("LinkedIn_Followers", 0)) if pd.notna(row.get("LinkedIn_Followers", 0)) else 0
+                x_followers = int(row.get("X_Followers", 0)) if pd.notna(row.get("X_Followers", 0)) else 0
+                instagram_followers = int(row.get("Instagram_Followers", 0)) if pd.notna(row.get("Instagram_Followers", 0)) else 0
+                tiktok_followers = int(row.get("TikTok_Followers", 0)) if pd.notna(row.get("TikTok_Followers", 0)) else 0
+                facebook_followers = int(row.get("Facebook_Followers", 0)) if pd.notna(row.get("Facebook_Followers", 0)) else 0
                 author_url = str(row["Author_URL"]).strip() if "Author_URL" in bulk_data.columns and pd.notna(row["Author_URL"]) else ""
 
                 status_text.text(f"Processing: {author} ({index + 1}/{total_authors})")
@@ -506,7 +510,7 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
         .format(make_clickable_wikipedia, subset=['Wikipedia_URL'], escape=False) \
         .format(subset=['Topical_Authority_SERP_Count', 'Scholar_Citations_Count',
                        'LinkedIn_Followers', 'X_Followers', 'Instagram_Followers',
-                       'TikTok_Followers', 'Facebook_Followers'], formatter='{:}')
+                       'TikTok_Followers', 'Facebook_Followers', 'Topical_Authority_Ratio'], formatter='{:}')
 
     st.dataframe(styled_df, use_container_width=True, height=500) 
 
@@ -518,7 +522,8 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
         mime="text/csv",
         help="Download the analysis results as a CSV file."
     )
-    st_progress_placeholder.empty() # Clear the processing message
+    progress_bar.empty() # Clear the processing bar
+    status_text.empty() # Clear the processing status message
     st_spinner_placeholder.empty() # Clear the spinner
     st.success("Bulk analysis complete!")
 
