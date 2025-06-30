@@ -57,15 +57,12 @@ def make_dataforseo_call(payload: dict) -> dict:
         return response.json()
     except requests.exceptions.HTTPError as http_err:
         error_msg = f"DataForSEO HTTP error ({response.status_code}): {http_err} - {response.text}"
-        # st.error(error_msg) # Commented out for cleaner UI, errors will be in data response
         return {"error": error_msg}
     except requests.exceptions.RequestException as req_err:
         error_msg = f"DataForSEO API request error: {req_err}"
-        # st.error(error_msg)
         return {"error": error_msg}
     except Exception as e:
         error_msg = f"An unexpected error occurred during DataForSEO call: {e}"
-        # st.error(error_msg)
         return {"error": error_msg}
 
 @st.cache_data(ttl=3600)
@@ -174,7 +171,6 @@ def calculate_quality_score(
     tiktok_followers: int,
     facebook_followers: int,
     matched_uk_publishers_count: int,
-    # is_competitor: bool - Removed as per request
 ) -> int:
     """Calculates a quality score based on various signals."""
     score = 0
@@ -187,14 +183,12 @@ def calculate_quality_score(
     # Scale scholar citations: 1 point per citation, capped at 10 points
     score += min(scholar_citations_count, 10)
 
-    # Social followers: 1 point per 10k followers across all platforms, capped at 20 points
+    # Social followers: 1 point per 10k followers across all platforms, capped at 20 points (increased cap)
     total_social_followers = linkedin_followers + x_followers + instagram_followers + tiktok_followers + facebook_followers
     score += min(total_social_followers // 10000, 20)
 
     # Points for writing for major UK publishers (2 points per publisher, capped at 10 points)
     score += min(matched_uk_publishers_count * 2, 10)
-
-    # if is_competitor: score -= 20 # Removed as per request
 
     return max(0, score) # Ensure score doesn't go negative
 
@@ -205,6 +199,18 @@ st.markdown("""
 This tool helps assess the perceived authority and expertise of authors based on key online signals,
 supporting the recruitment of high-quality freelancers for The Telegraph Recommended.
 """)
+# --- END Main Page Title ---
+
+# --- Initialize Session State for Results ---
+# This ensures results persist across reruns and are visible in the main section
+if 'single_author_display_results' not in st.session_state:
+    st.session_state['single_author_display_results'] = None
+if 'bulk_analysis_results_df' not in st.session_state:
+    st.session_state['bulk_analysis_results_df'] = None
+if 'triggered_single_analysis' not in st.session_state:
+    st.session_state['triggered_single_analysis'] = False
+if 'triggered_bulk_analysis' not in st.session_state:
+    st.session_state['triggered_bulk_analysis'] = False
 
 # --- Sidebar ---
 with st.sidebar:
@@ -234,26 +240,47 @@ with st.sidebar:
             single_tiktok_followers = st.number_input("TikTok:", min_value=0, value=0, step=100, key="single_tiktok_followers_input")
             single_facebook_followers = st.number_input("Facebook:", min_value=0, value=0, step=100, key="single_facebook_followers_input")
 
-        # Define a dummy competitor_authors_list for single author logic, as the input is removed
-        # The quality score logic for is_competitor is also removed now.
-        dummy_competitor_authors_list = [] 
+        # Define a dummy competitor_authors_list if needed by any function, though it's removed from score
+        # For this version, competitor logic is fully removed.
 
         if st.button("Analyze Single Author", use_container_width=True):
             if single_author_name:
-                # Store single analysis results in session state to display in main section
-                st.session_state['single_author_results'] = {
-                    "Author": single_author_name,
-                    "Keyword": single_keyword_topic,
-                    "Author_URL": single_author_url,
-                    "LinkedIn_Followers": single_linkedin_followers,
-                    "X_Followers": single_x_followers,
-                    "Instagram_Followers": single_instagram_followers,
-                    "TikTok_Followers": single_tiktok_followers,
-                    "Facebook_Followers": single_facebook_followers
-                }
-                st.session_state['run_single_analysis'] = True
-                # Rerun the app to show results in main section
-                st.experimental_rerun()
+                with st.spinner(f"Analyzing '{single_author_name}'... This may take a moment due to API calls."):
+                    # API Calls
+                    kp_exists, kp_details = check_knowledge_panel(single_author_name)
+                    wiki_exists, wiki_details = check_wikipedia(single_author_name)
+                    topical_authority_serp_count = get_topical_authority_serp_count(single_author_name, single_keyword_topic)
+                    all_associated_domains, matched_uk_publishers = get_author_associated_brands(single_author_name)
+                    scholar_citations_count = check_google_scholar_citations(single_author_name)
+                    
+                    quality_score = calculate_quality_score(
+                        kp_exists, wiki_exists, topical_authority_serp_count,
+                        scholar_citations_count, single_linkedin_followers, single_x_followers,
+                        single_instagram_followers, single_tiktok_followers, single_facebook_followers,
+                        len(matched_uk_publishers)
+                    )
+
+                    # Store results in session state for display in main section
+                    st.session_state['single_author_display_results'] = pd.DataFrame([{
+                        "Author": single_author_name,
+                        "Keyword": single_keyword_topic,
+                        "Author_URL": single_author_url,
+                        "Quality_Score": quality_score,
+                        "Has_Knowledge_Panel": "✅ Yes" if kp_exists else "❌ No",
+                        "Has_Wikipedia_Page": "✅ Yes" if wiki_exists else "❌ No",
+                        "Topical_Authority_SERP_Count": f"{topical_authority_serp_count:,}",
+                        "Scholar_Citations_Count": f"{scholar_citations_count:,}",
+                        "Matched_UK_Publishers": ", ".join(matched_uk_publishers) if matched_uk_publishers else "None",
+                        "All_Associated_Domains": ", ".join(all_associated_domains),
+                        "LinkedIn_Followers": f"{single_linkedin_followers:,}",
+                        "X_Followers": f"{single_x_followers:,}",
+                        "Instagram_Followers": f"{single_instagram_followers:,}",
+                        "TikTok_Followers": f"{single_tiktok_followers:,}",
+                        "Facebook_Followers": f"{single_facebook_followers:,}",
+                        "KP_Details": kp_details,
+                        "Wikipedia_Details": wiki_details
+                    }])
+                    st.session_state['triggered_single_analysis'] = True # Set flag to display
             else:
                 st.warning("Please enter an author name to analyze.")
 
@@ -264,10 +291,10 @@ with st.sidebar:
     st.markdown("""
     Upload a CSV file with the following columns:
     - **Author** (required): Full name of the author.
-    - **Keyword** (optional): Relevant topic for expertise (e.g., 'personal finance').
+    - **Keyword** (optional): Relevant topic for expertise.
     - **Author_URL** (optional): Author's profile URL.
     - **LinkedIn_Followers** (optional): Manual LinkedIn follower count.
-    - **X_Followers** (optional): Manual X follower count.
+    - **X_Followers** (optional): Manual X (Twitter) follower count.
     - **Instagram_Followers** (optional): Manual Instagram follower count.
     - **TikTok_Followers** (optional): Manual TikTok follower count.
     - **Facebook_Followers** (optional): Manual Facebook follower count.
@@ -279,9 +306,10 @@ with st.sidebar:
             bulk_data = pd.read_csv(uploaded_file)
             if "Author" not in bulk_data.columns:
                 st.error("The CSV file must contain an 'Author' column.")
-                st.stop()
-            st.success("CSV uploaded successfully. Click 'Run Bulk Analysis' below.")
-            st.session_state['bulk_data_to_process'] = bulk_data # Store for processing later
+                st.session_state['bulk_data_to_process'] = None
+            else:
+                st.success("CSV uploaded successfully. Click 'Run Bulk Analysis' below.")
+                st.session_state['bulk_data_to_process'] = bulk_data # Store for processing later
         except pd.errors.EmptyDataError:
             st.error("The uploaded CSV file is empty.")
             st.session_state['bulk_data_to_process'] = None
@@ -292,102 +320,37 @@ with st.sidebar:
         st.session_state['bulk_data_to_process'] = None
 
     if st.button("Run Bulk Analysis", use_container_width=True, disabled=(st.session_state.get('bulk_data_to_process') is None)):
-        st.session_state['run_bulk_analysis'] = True
-        st.experimental_rerun()
-
+        if st.session_state['bulk_data_to_process'] is not None:
+            st.session_state['triggered_bulk_analysis'] = True # Set flag to display
+            # No st.experimental_rerun() here, main section will pick up the flag on next run
 
 # --- Main Content Area (Visualization) ---
-st.header("Analysis Results")
-st.markdown("---") # Separator for results section
-
-# Initialize session state for displaying results
-if 'single_author_results' not in st.session_state:
-    st.session_state['single_author_results'] = None
-if 'bulk_analysis_results_df' not in st.session_state:
-    st.session_state['bulk_analysis_results_df'] = None
-if 'run_single_analysis' not in st.session_state:
-    st.session_state['run_single_analysis'] = False
-if 'run_bulk_analysis' not in st.session_state:
-    st.session_state['run_bulk_analysis'] = False
-
-# Process and display single author results if triggered
-if st.session_state['run_single_analysis'] and st.session_state['single_author_results']:
+# Display single author results if triggered
+if st.session_state['triggered_single_analysis'] and st.session_state['single_author_display_results'] is not None:
     st.subheader("Individual Author Analysis Results")
-    
-    author_info = st.session_state['single_author_results']
-    author = author_info["Author"]
-    keyword = author_info["Keyword"]
-    linkedin_followers = author_info["LinkedIn_Followers"]
-    x_followers = author_info["X_Followers"]
-    instagram_followers = author_info["Instagram_Followers"]
-    tiktok_followers = author_info["TikTok_Followers"]
-    facebook_followers = author_info["Facebook_Followers"]
-    author_url = author_info["Author_URL"]
+    st.dataframe(st.session_state['single_author_display_results'].style.apply(
+        lambda s: ['background-color: #d4edda'] * len(s) if s['Quality_Score'].iloc[0] >= 30 else (
+            ['background-color: #ffeeba'] * len(s) if s['Quality_Score'].iloc[0] >= 15 else
+            ['background-color: #f8d7da'] * len(s)
+        ), axis=1
+    ).applymap(
+        lambda x: 'background-color: #e0ffe0' if '✅' in str(x) else ('background-color: #fff0f0' if '❌' in str(x) else ''),
+        subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page']
+    ), use_container_width=True)
+    # Reset the trigger after display
+    st.session_state['triggered_single_analysis'] = False
 
-    with st.spinner(f"Analyzing '{author}'... This may take a moment due to API calls."):
-        # API Calls
-        kp_exists, kp_details = check_knowledge_panel(author)
-        wiki_exists, wiki_details = check_wikipedia(author)
-        topical_authority_serp_count = get_topical_authority_serp_count(author, keyword)
-        all_associated_domains, matched_uk_publishers = get_author_associated_brands(author)
-        scholar_citations_count = check_google_scholar_citations(author)
-
-        # Removed competitor check for single author as input is gone
-        is_competitor = False # Default to False since input is removed
-        
-        quality_score = calculate_quality_score(
-            kp_exists, wiki_exists, topical_authority_serp_count,
-            scholar_citations_count, linkedin_followers, x_followers,
-            instagram_followers, tiktok_followers, facebook_followers,
-            len(matched_uk_publishers)
-            # is_competitor is removed from this score calculation
-        )
-
-        single_author_results_row = pd.DataFrame([{
-            "Author": author,
-            "Keyword": keyword,
-            "Author_URL": author_url,
-            "Quality_Score": quality_score,
-            "Has_Knowledge_Panel": "✅ Yes" if kp_exists else "❌ No",
-            "Has_Wikipedia_Page": "✅ Yes" if wiki_exists else "❌ No",
-            "Topical_Authority_SERP_Count": f"{topical_authority_serp_count:,}",
-            "Scholar_Citations_Count": f"{scholar_citations_count:,}",
-            "Matched_UK_Publishers": ", ".join(matched_uk_publishers) if matched_uk_publishers else "None",
-            "LinkedIn_Followers": f"{linkedin_followers:,}",
-            "X_Followers": f"{x_followers:,}",
-            "Instagram_Followers": f"{instagram_followers:,}",
-            "TikTok_Followers": f"{tiktok_followers:,}",
-            "Facebook_Followers": f"{facebook_followers:,}",
-            "Associated_Brands_Domains": ", ".join(all_associated_domains),
-            "KP_Details": kp_details, # For more detail if needed, could be hidden in expander
-            "Wikipedia_Details": wiki_details # For more detail
-        }])
-
-        st.dataframe(single_author_results_row.style.apply(
-            lambda s: ['background-color: #d4edda'] * len(s) if s['Quality_Score'].iloc[0] >= 30 else (
-                ['background-color: #ffeeba'] * len(s) if s['Quality_Score'].iloc[0] >= 15 else
-                ['background-color: #f8d7da'] * len(s)
-            ), axis=1
-        ).applymap(
-            lambda x: 'background-color: #e0ffe0' if '✅' in str(x) else ('background-color: #fff0f0' if '❌' in str(x) else ''),
-            subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page']
-        ), use_container_width=True)
-
-        # Reset flag
-        st.session_state['run_single_analysis'] = False
-        st.session_state['single_author_results'] = None # Clear previous results
-
-# Process and display bulk analysis results if triggered
-elif st.session_state['run_bulk_analysis'] and st.session_state['bulk_data_to_process'] is not None:
+# Display bulk analysis results if triggered
+elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data_to_process'] is not None:
     st.subheader("Bulk Author Analysis Results")
+    
+    # Process the data here (it's triggered by the button, so this runs on next script execution)
     bulk_data = st.session_state['bulk_data_to_process']
     results = []
     total_authors = len(bulk_data)
-    progress_bar = st.progress(0)
-    status_text = st.empty()
     
-    # Define a dummy competitor_authors_list for bulk processing as input is removed
-    dummy_competitor_authors_list = [] # No longer needed for logic, but kept for function signature
+    # Placeholder for status/progress if needed, or remove for cleaner display
+    st_progress_placeholder = st.empty() 
 
     for index, row in bulk_data.iterrows():
         author = str(row["Author"]).strip()
@@ -399,8 +362,7 @@ elif st.session_state['run_bulk_analysis'] and st.session_state['bulk_data_to_pr
         facebook_followers = int(row["Facebook_Followers"]) if "Facebook_Followers" in bulk_data.columns and pd.notna(row["Facebook_Followers"]) else 0
         author_url = str(row["Author_URL"]).strip() if "Author_URL" in bulk_data.columns and pd.notna(row["Author_URL"]) else ""
 
-
-        status_text.text(f"Processing: {author} ({index + 1}/{total_authors})")
+        st_progress_placeholder.text(f"Processing: {author} ({index + 1}/{total_authors})")
 
         # API Calls
         kp_exists, kp_details = check_knowledge_panel(author)
@@ -408,16 +370,12 @@ elif st.session_state['run_bulk_analysis'] and st.session_state['bulk_data_to_pr
         topical_authority_serp_count = get_topical_authority_serp_count(author, keyword)
         all_associated_domains, matched_uk_publishers = get_author_associated_brands(author)
         scholar_citations_count = check_google_scholar_citations(author)
-
-        # Removed competitor check
-        is_competitor = False # Default to False since input is removed
         
         quality_score = calculate_quality_score(
             kp_exists, wiki_exists, topical_authority_serp_count,
             scholar_citations_count, linkedin_followers, x_followers,
             instagram_followers, tiktok_followers, facebook_followers,
             len(matched_uk_publishers)
-            # is_competitor is removed from this score calculation
         )
 
         results.append({
@@ -430,7 +388,7 @@ elif st.session_state['run_bulk_analysis'] and st.session_state['bulk_data_to_pr
             "Topical_Authority_SERP_Count": f"{topical_authority_serp_count:,}",
             "Scholar_Citations_Count": f"{scholar_citations_count:,}",
             "Matched_UK_Publishers": ", ".join(matched_uk_publishers) if matched_uk_publishers else "None",
-            "All_Associated_Domains": ", ".join(all_associated_domains), # All domains for CSV
+            "All_Associated_Domains": ", ".join(all_associated_domains),
             "LinkedIn_Followers": f"{linkedin_followers:,}",
             "X_Followers": f"{x_followers:,}",
             "Instagram_Followers": f"{instagram_followers:,}",
@@ -439,17 +397,16 @@ elif st.session_state['run_bulk_analysis'] and st.session_state['bulk_data_to_pr
             "KP_Details": kp_details,
             "Wikipedia_Details": wiki_details
         })
-        progress_bar.progress((index + 1) / total_authors)
         time.sleep(1) # Small delay to be mindful of API rate limits and display updates
 
     results_df = pd.DataFrame(results)
     st.session_state['bulk_analysis_results_df'] = results_df # Store for display
     
-    # Reset flag
-    st.session_state['run_bulk_analysis'] = False
+    # Reset flags and data after processing
+    st.session_state['triggered_bulk_analysis'] = False
     st.session_state['bulk_data_to_process'] = None # Clear data after processing
 
-    # Display results immediately after processing
+    # --- Visualisation of Bulk Results ---
     st.markdown("### High-Level Summary")
     col_sum1, col_sum2, col_sum3 = st.columns(3)
     with col_sum1:
@@ -486,7 +443,7 @@ elif st.session_state['run_bulk_analysis'] and st.session_state['bulk_data_to_pr
         .applymap(highlight_tick_cross_bg, subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page']) \
         .format(subset=['Topical_Authority_SERP_Count', 'Scholar_Citations_Count',
                        'LinkedIn_Followers', 'X_Followers', 'Instagram_Followers',
-                       'TikTok_Followers', 'Facebook_Followers'], formatter='{:}') # Ensure numbers are formatted as strings already
+                       'TikTok_Followers', 'Facebook_Followers'], formatter='{:}')
 
     st.dataframe(styled_df, use_container_width=True, height=500) # Added height for scrollability
 
@@ -499,8 +456,12 @@ elif st.session_state['run_bulk_analysis'] and st.session_state['bulk_data_to_pr
         mime="text/csv",
         help="Download the analysis results as a CSV file."
     )
-    status_text.success("Bulk analysis complete!")
+    st_progress_placeholder.empty() # Clear the processing message
+    st.success("Bulk analysis complete!")
 
-# Initial display or if no analysis has run yet
+# If neither analysis has been triggered yet, show an initial message
+elif not st.session_state['triggered_single_analysis'] and not st.session_state['triggered_bulk_analysis']:
+    st.info("Use the sidebar to input author details for individual analysis, or upload a CSV for bulk processing. Results will appear here.")
 else:
-    st.info("Use the sidebar to input author details for individual analysis, or upload a CSV for bulk processing.")
+    # This else block should ideally not be hit, but acts as a fallback
+    st.info("Please wait, processing analysis...")
