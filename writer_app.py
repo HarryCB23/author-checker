@@ -329,16 +329,18 @@ st.markdown("---") # Separator for results section
 if st.session_state['triggered_single_analysis'] and st.session_state['single_author_display_results'] is not None:
     st.subheader("Individual Author Analysis Results")
     
-    # Define styling functions here to ensure they are properly scoped for single display
-    def highlight_score_color_row(s):
-        score_val = s['Quality_Score'].iloc[0] # Quality_Score is already int
+    # Redefine styling functions locally for clarity/scoping
+    # This is the function that needs to be applied cell-wise (via .map) to the 'Quality_Score' column
+    def highlight_score_color_cell(val):
+        score_val = int(val) # Already formatted to int in results.append, but ensure here
         if score_val >= 30:
-            return ['background-color: #d4edda'] * len(s) # Light green
+            return 'background-color: #d4edda' # Light green
         elif score_val >= 15:
-            return ['background-color: #ffeeba'] * len(s) # Light yellow
+            return 'background-color: #ffeeba' # Light yellow
         else:
-            return ['background-color: #f8d7da'] * len(s) # Light red
+            return 'background-color: #f8d7da' # Light red
     
+    # This function is applied cell-wise (via .applymap) to 'Has_Knowledge_Panel', 'Has_Wikipedia_Page'
     def highlight_tick_cross_bg_cell(val):
         if '✅' in str(val):
             return 'background-color: #e0ffe0' # Very light green
@@ -346,8 +348,8 @@ if st.session_state['triggered_single_analysis'] and st.session_state['single_au
             return 'background-color: #fff0f0' # Very light red
         return ''
 
-    st.dataframe(st.session_state['single_author_display_results'].style.apply(
-        highlight_score_color_row, axis=1
+    st.dataframe(st.session_state['single_author_display_results'].style.map(
+        highlight_score_color_cell, subset=['Quality_Score'] # Use .map for single column coloring
     ).applymap(
         highlight_tick_cross_bg_cell,
         subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page']
