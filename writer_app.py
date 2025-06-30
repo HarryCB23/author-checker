@@ -183,7 +183,7 @@ def calculate_quality_score(
     # Scale scholar citations: 1 point per citation, capped at 10 points
     score += min(scholar_citations_count, 10)
 
-    # Social followers: 1 point per 10k followers across all platforms, capped at 20 points (increased cap)
+    # Social followers: 1 point per 10k followers across all platforms, capped at 20 points
     total_social_followers = linkedin_followers + x_followers + instagram_followers + tiktok_followers + facebook_followers
     score += min(total_social_followers // 10000, 20)
 
@@ -240,9 +240,6 @@ with st.sidebar:
             single_tiktok_followers = st.number_input("TikTok:", min_value=0, value=0, step=100, key="single_tiktok_followers_input")
             single_facebook_followers = st.number_input("Facebook:", min_value=0, value=0, step=100, key="single_facebook_followers_input")
 
-        # Define a dummy competitor_authors_list if needed by any function, though it's removed from score
-        # For this version, competitor logic is fully removed.
-
         if st.button("Analyze Single Author", use_container_width=True):
             if single_author_name:
                 with st.spinner(f"Analyzing '{single_author_name}'... This may take a moment due to API calls."):
@@ -265,7 +262,7 @@ with st.sidebar:
                         "Author": single_author_name,
                         "Keyword": single_keyword_topic,
                         "Author_URL": single_author_url,
-                        "Quality_Score": quality_score,
+                        "Quality_Score": quality_score, # Keep as int for styling to work smoothly
                         "Has_Knowledge_Panel": "✅ Yes" if kp_exists else "❌ No",
                         "Has_Wikipedia_Page": "✅ Yes" if wiki_exists else "❌ No",
                         "Topical_Authority_SERP_Count": f"{topical_authority_serp_count:,}",
@@ -275,10 +272,10 @@ with st.sidebar:
                         "LinkedIn_Followers": f"{single_linkedin_followers:,}",
                         "X_Followers": f"{single_x_followers:,}",
                         "Instagram_Followers": f"{single_instagram_followers:,}",
-                        "TikTok_Followers": f"{single_tiktok_followers:,}",
+                        "TikTok_Followers": f"{tiktok_followers:,}",
                         "Facebook_Followers": f"{single_facebook_followers:,}",
-                        "KP_Details": kp_details,
-                        "Wikipedia_Details": wiki_details
+                        "KP_Details": kp_details, # For more detail if needed, could be hidden in expander
+                        "Wikipedia_Details": wiki_details # For more detail
                     }])
                     st.session_state['triggered_single_analysis'] = True # Set flag to display
             else:
@@ -322,25 +319,44 @@ with st.sidebar:
     if st.button("Run Bulk Analysis", use_container_width=True, disabled=(st.session_state.get('bulk_data_to_process') is None)):
         if st.session_state['bulk_data_to_process'] is not None:
             st.session_state['triggered_bulk_analysis'] = True # Set flag to display
-            # No st.experimental_rerun() here, main section will pick up the flag on next run
+
 
 # --- Main Content Area (Visualization) ---
-# Display single author results if triggered
+st.header("Analysis Results")
+st.markdown("---") # Separator for results section
+
+# Process and display single author results if triggered
 if st.session_state['triggered_single_analysis'] and st.session_state['single_author_display_results'] is not None:
     st.subheader("Individual Author Analysis Results")
+    
+    def highlight_score_color_row(s):
+        score_val = s['Quality_Score'].iloc[0] # Quality_Score is already int
+        if score_val >= 30:
+            return ['background-color: #d4edda'] * len(s) # Light green
+        elif score_val >= 15:
+            return ['background-color: #ffeeba'] * len(s) # Light yellow
+        else:
+            return ['background-color: #f8d7da'] * len(s) # Light red
+    
+    def highlight_tick_cross_bg_cell(val):
+        if '✅' in str(val):
+            return 'background-color: #e0ffe0' # Very light green
+        elif '❌' in str(val):
+            return 'background-color: #fff0f0' # Very light red
+        return ''
+
     st.dataframe(st.session_state['single_author_display_results'].style.apply(
-        lambda s: ['background-color: #d4edda'] * len(s) if s['Quality_Score'].iloc[0] >= 30 else (
-            ['background-color: #ffeeba'] * len(s) if s['Quality_Score'].iloc[0] >= 15 else
-            ['background-color: #f8d7da'] * len(s)
-        ), axis=1
+        highlight_score_color_row, axis=1
     ).applymap(
-        lambda x: 'background-color: #e0ffe0' if '✅' in str(x) else ('background-color: #fff0f0' if '❌' in str(x) else ''),
+        highlight_tick_cross_bg_cell,
         subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page']
     ), use_container_width=True)
+
     # Reset the trigger after display
     st.session_state['triggered_single_analysis'] = False
+    st.session_state['single_author_display_results'] = None # Clear previous results after display
 
-# Display bulk analysis results if triggered
+# Process and display bulk analysis results if triggered
 elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data_to_process'] is not None:
     st.subheader("Bulk Author Analysis Results")
     
@@ -349,8 +365,8 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
     results = []
     total_authors = len(bulk_data)
     
-    # Placeholder for status/progress if needed, or remove for cleaner display
-    st_progress_placeholder = st.empty() 
+    progress_bar = st.progress(0)
+    status_text = st.empty() 
 
     for index, row in bulk_data.iterrows():
         author = str(row["Author"]).strip()
@@ -362,7 +378,7 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
         facebook_followers = int(row["Facebook_Followers"]) if "Facebook_Followers" in bulk_data.columns and pd.notna(row["Facebook_Followers"]) else 0
         author_url = str(row["Author_URL"]).strip() if "Author_URL" in bulk_data.columns and pd.notna(row["Author_URL"]) else ""
 
-        st_progress_placeholder.text(f"Processing: {author} ({index + 1}/{total_authors})")
+        status_text.text(f"Processing: {author} ({index + 1}/{total_authors})")
 
         # API Calls
         kp_exists, kp_details = check_knowledge_panel(author)
@@ -382,7 +398,7 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
             "Author": author,
             "Keyword": keyword,
             "Author_URL": author_url,
-            "Quality_Score": quality_score,
+            "Quality_Score": quality_score, # Keep as int for styling to work smoothly
             "Has_Knowledge_Panel": "✅ Yes" if kp_exists else "❌ No",
             "Has_Wikipedia_Page": "✅ Yes" if wiki_exists else "❌ No",
             "Topical_Authority_SERP_Count": f"{topical_authority_serp_count:,}",
@@ -421,8 +437,10 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
     st.markdown("---")
     st.markdown("### Detailed Results Table")
     
-    def highlight_score_color(val):
-        score_val = int(val) # Convert to int for comparison
+    # Define styling functions here to ensure they are accessible
+    def highlight_score_color_cell(val):
+        # Apply only to the Quality_Score column itself
+        score_val = int(val) 
         if score_val >= 30:
             return 'background-color: #d4edda' # Light green
         elif score_val >= 15:
@@ -430,7 +448,7 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
         else:
             return 'background-color: #f8d7da' # Light red
 
-    def highlight_tick_cross_bg(val):
+    def highlight_tick_cross_bg_cell(val):
         if '✅' in str(val):
             return 'background-color: #e0ffe0' # Very light green
         elif '❌' in str(val):
@@ -438,9 +456,13 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
         return ''
 
     # Apply styling
+    # Note: applymap is for cell-wise. For row-wise apply, use .apply(func, axis=1) on the whole row.
+    # We will use applymap for individual cells, and rely on the Quality_Score being a single cell value for its highlighting.
+    
+    # For Quality_Score column, apply cell-wise coloring
     styled_df = results_df.style \
-        .applymap(highlight_score_color, subset=['Quality_Score']) \
-        .applymap(highlight_tick_cross_bg, subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page']) \
+        .map(highlight_score_color_cell, subset=['Quality_Score']) \
+        .applymap(highlight_tick_cross_bg_cell, subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page']) \
         .format(subset=['Topical_Authority_SERP_Count', 'Scholar_Citations_Count',
                        'LinkedIn_Followers', 'X_Followers', 'Instagram_Followers',
                        'TikTok_Followers', 'Facebook_Followers'], formatter='{:}')
@@ -463,5 +485,10 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
 elif not st.session_state['triggered_single_analysis'] and not st.session_state['triggered_bulk_analysis']:
     st.info("Use the sidebar to input author details for individual analysis, or upload a CSV for bulk processing. Results will appear here.")
 else:
-    # This else block should ideally not be hit, but acts as a fallback
-    st.info("Please wait, processing analysis...")
+    # This else block handles the brief moment when a button is clicked,
+    # the app reruns, but results are not yet processed for display.
+    # It provides a continuous spinner.
+    with st.spinner("Processing your request... Please wait."):
+        # This spinner will display while the main processing loop runs in the next rerun
+        # or if the app is just starting up after a trigger.
+        pass # The actual processing happens in the blocks above
