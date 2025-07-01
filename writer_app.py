@@ -96,35 +96,34 @@ def check_knowledge_panel(author: str) -> tuple[bool, str]:
 
     if data and "tasks" in data and data["tasks"]:
         for task in data["tasks"]:
-            # Primary check: Is the entire task itself a knowledge_graph? (common for direct KP retrieval)
-            if task.get("type") == "knowledge_graph" and "result" in task and task["result"]:
-                # Check the first item within this knowledge_graph task's result
-                if task["result"] and task["result"][0]:
+            # Priority 1: Check if the task itself is a knowledge_graph type (as seen in your JSON structure for KP)
+            if task.get("type") == "knowledge_graph":
+                if "result" in task and task["result"] and task["result"][0]:
                     kp_block_data = task["result"][0]
                     kp_title = kp_block_data.get("title", "").lower()
-                    if kp_title == author.lower() or author.lower() in kp_block_data.get("description", "").lower():
-                        return True, "Knowledge Panel found (direct task result)"
-                    if "items" in kp_block_data:
+                    # Check for exact match or presence in description/subtitle for robust validation
+                    if kp_title == author.lower() or author.lower() in kp_block_data.get("description", "").lower() or author.lower() in kp_block_data.get("subtitle", "").lower():
+                        return True, "Knowledge Panel found (direct task result type)"
+                    if "items" in kp_block_data: # Also check sub-items of this direct KP block
                         for sub_item in kp_block_data["items"]:
                             if sub_item.get("type") in ["knowledge_graph_description_item", "knowledge_graph_row_item"]:
                                 if author.lower() in sub_item.get("text", "").lower() or author.lower() in sub_item.get("title", "").lower():
-                                    return True, "Knowledge Panel found (direct task result, via sub-item)"
-            
-            # Secondary check: Iterate through results within a task (e.g., an 'organic' task)
+                                    return True, "Knowledge Panel found (direct task result type, via sub-item)"
+
+            # Priority 2: Iterate through 'result' blocks within a task (e.g., 'organic' task) and check their 'items'
             if "result" in task and task["result"]:
                 for result_block in task["result"]:
-                    # Check if 'knowledge_graph' is an item nested directly under result_block's 'items'
-                    if result_block.get("items"):
+                    if result_block.get("items"): # Check if this block has an 'items' array
                         for item_nested in result_block["items"]:
                             if item_nested.get("type") == "knowledge_graph":
                                 kp_title = item_nested.get("title", "").lower()
                                 if kp_title == author.lower() or author.lower() in item_nested.get("description", "").lower():
-                                    return True, "Knowledge Panel found (nested in organic items)"
+                                    return True, "Knowledge Panel found (nested in result_block items)"
                                 if "items" in item_nested: # Check sub-items if this nested KP has them
                                     for sub_item_nested in item_nested["items"]:
                                         if sub_item_nested.get("type") in ["knowledge_graph_description_item", "knowledge_graph_row_item"]:
                                             if author.lower() in sub_item_nested.get("text", "").lower() or author.lower() in sub_item_nested.get("title", "").lower():
-                                                return True, "Knowledge Panel found (nested in organic items, via sub-item)"
+                                                return True, "Knowledge Panel found (nested in result_block items, via sub-item)"
         return False, "No Knowledge Panel found in SERP results"
     return False, data.get("error", "No data or task in DataForSEO response.")
 
@@ -143,7 +142,7 @@ def check_wikipedia(author: str) -> tuple[bool, str, str]:
             wikipedia_url = pages[page_id].get("fullurl", "")
             return True, "Wikipedia page found", wikipedia_url
         return False, "No Wikipedia page found", ""
-    except requests.exceptions.RequestError as e:
+    except requests.exceptions.RequestException as e:
         return False, f"Wikipedia API error: {e}", ""
     except Exception as e:
         return False, f"An unexpected error occurred checking Wikipedia: {e}", ""
@@ -186,7 +185,7 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
     # Initialize task data holders based on the original requested keywords
     author_topic_data_task = {}
     topic_only_data_task = {}
-    author_only_data_task = {} # This will hold data for `"Allison Pearson"` search
+    author_only_data_task = {} # This will hold data for "Allison Pearson" search
 
     if batch_data_response and "tasks" in batch_data_response:
         for task in batch_data_response["tasks"]:
@@ -208,21 +207,16 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
     perspectives_domains = set() # Always collected
 
     # --- Extract Perspectives Domains from the author_only_data_task ---
-    # Based on JSON, perspectives is a direct block within result, or sometimes nested under organic items
+    # Based on JSON, perspectives is a block within 'items' of the primary 'organic' result block
     if "result" in author_only_data_task and author_only_data_task["result"]:
         for result_block in author_only_data_task["result"]:
-            # Direct perspectives block
-            if result_block.get("type") == "perspectives" and result_block.get("items"):
-                for perspective_item in result_block["items"]:
-                    if perspective_item.get("domain"):
-                        perspectives_domains.add(perspective_item["domain"])
-            # Perspectives nested within items of another block (e.g., primary organic block)
-            elif "items" in result_block:
-                for nested_item in result_block["items"]:
-                    if nested_item.get("type") == "perspectives" and nested_item.get("items"):
-                        for perspective_item in nested_item["items"]:
+            if "items" in result_block: # Most SERP features are nested here
+                for item_in_block in result_block["items"]:
+                    if item_in_block.get("type") == "perspectives" and item_in_block.get("items"):
+                        for perspective_item in item_in_block["items"]:
                             if perspective_item.get("domain"):
                                 perspectives_domains.add(perspective_item["domain"])
+                        break # Found perspectives, no need to check other items in this block
     
     # If no topic is provided for topical authority calculation, return early for those fields
     if not topic:
