@@ -413,12 +413,16 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
             for index, row in bulk_data.iterrows():
                 author = str(row["Author"]).strip()
                 keyword = str(row["Keyword"]).strip() if "Keyword" in bulk_data.columns and pd.notna(row["Keyword"]) else ""
-                # Ensure all follower variables are always defined and converted to int robustly
-                linkedin_followers = pd.to_numeric(row.get("LinkedIn_Followers", 0), errors='coerce').fillna(0).astype(int)
-                x_followers = pd.to_numeric(row.get("X_Followers", 0), errors='coerce').fillna(0).astype(int)
-                instagram_followers = pd.to_numeric(row.get("Instagram_Followers", 0), errors='coerce').fillna(0).astype(int)
-                tiktok_followers = pd.to_numeric(row.get("TikTok_Followers", 0), errors='coerce').fillna(0).astype(int)
-                facebook_followers = pd.to_numeric(row.get("Facebook_Followers", 0), errors='coerce').fillna(0).astype(int)
+                
+                # --- ROBUSTLY GET FOLLOWER COUNTS ---
+                # Use .get() with a default of 0, then ensure integer type
+                linkedin_followers = int(pd.to_numeric(row.get("LinkedIn_Followers", 0), errors='coerce').fillna(0))
+                x_followers = int(pd.to_numeric(row.get("X_Followers", 0), errors='coerce').fillna(0))
+                instagram_followers = int(pd.to_numeric(row.get("Instagram_Followers", 0), errors='coerce').fillna(0))
+                tiktok_followers = int(pd.to_numeric(row.get("TikTok_Followers", 0), errors='coerce').fillna(0))
+                facebook_followers = int(pd.to_numeric(row.get("Facebook_Followers", 0), errors='coerce').fillna(0))
+                # --- END ROBUST FOLLOWER COUNTS ---
+
                 author_url = str(row["Author_URL"]).strip() if "Author_URL" in bulk_data.columns and pd.notna(row["Author_URL"]) else ""
 
                 status_text.text(f"Processing: {author} ({index + 1}/{total_authors})")
