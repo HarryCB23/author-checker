@@ -562,7 +562,7 @@ if st.session_state['triggered_single_analysis'] and st.session_state['single_au
     st.dataframe(styled_single_df, use_container_width=True)
 
     st.session_state['triggered_single_analysis'] = False
-    st.session_session_state['single_author_display_results'] = None
+    st.session_state['single_author_display_results'] = None
 
 # Process and display bulk analysis results if triggered
 elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data_to_process'] is not None:
