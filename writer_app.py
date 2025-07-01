@@ -35,7 +35,6 @@ EXCLUDED_GENERIC_DOMAINS_REGEX = [
     r"facebook\.com", r"instagram\.com", r"youtube\.com", r"pinterest\.com",
     r"tiktok\.com", r"medium\.com", r"quora\.com", r"reddit\.com",
     r"threads\.net", r"amazon\.", # Keep Amazon excluded
-    # Removed telegraph.co.uk from exclusions as it's now in UK_PUBLISHER_DOMAINS
 ]
 
 # --- Helper Functions ---
@@ -127,26 +126,40 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
         {"keyword": topic_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"}
     ]
     
-    # Make a single batch call for efficiency (if DataForSEO supports it, or sequential if not)
     # make_dataforseo_call is set up to handle a list of payloads, so this is good.
-    batch_data = make_dataforseo_call(payloads)
+    batch_data_response = make_dataforseo_call(payloads)
 
-    author_topic_data = batch_data["tasks"][0] if batch_data and "tasks" in batch_data and len(batch_data["tasks"]) > 0 else {"error": "No data for author_topic"}
-    topic_only_data = batch_data["tasks"][1] if batch_data and "tasks" in batch_data and len(batch_data["tasks"]) > 1 else {"error": "No data for topic_only"}
+    author_topic_data_task = None
+    topic_only_data_task = None
 
-    # --- Extract Topical Authority Results Count ---
-    author_topic_results_count = 0
-    if "result" in author_topic_data and author_topic_data["result"]:
-        for result in author_topic_data["result"]:
-            author_topic_results_count = result.get("serp", {}).get("results_count", 0)
-            if author_topic_results_count > 0:
+    if batch_data_response and "tasks" in batch_data_response:
+        for i, task in enumerate(batch_data_response["tasks"]):
+            if task.get("data", {}).get("keyword") == author_topic_query and "result" in task:
+                author_topic_data_task = task
+            elif task.get("data", {}).get("keyword") == topic_query and "result" in task:
+                topic_only_data_task = task
+            # If both are found, break early
+            if author_topic_data_task and topic_only_data_task:
                 break
 
+    # Initialize defaults
+    author_topic_results_count = 0
     total_topic_results_count = 0
-    if "result" in topic_only_data and topic_only_data["result"]:
-        for result in topic_only_data["result"]:
-            total_topic_results_count = result.get("serp", {}).get("results_count", 0)
-            if total_topic_results_count > 0:
+    ai_overview_summary = "N/A"
+    top_stories_mentions = []
+    topical_associated_domains = set()
+
+    # --- Extract Topical Authority Results Count ---
+    if author_topic_data_task and "result" in author_topic_data_task:
+        for result_item in author_topic_data_task["result"]:
+            author_topic_results_count = result_item.get("serp", {}).get("results_count", 0)
+            if author_topic_results_count > 0: # Found the count, can break
+                break
+
+    if topic_only_data_task and "result" in topic_only_data_task:
+        for result_item in topic_only_data_task["result"]:
+            total_topic_results_count = result_item.get("serp", {}).get("results_count", 0)
+            if total_topic_results_count > 0: # Found the count, can break
                 break
 
     topical_authority_ratio = 0.0
@@ -154,31 +167,35 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
         topical_authority_ratio = (author_topic_results_count / total_topic_results_count) * 100
 
     # --- Extract AI Overview ---
-    ai_overview_summary = "N/A"
-    if "result" in author_topic_data and author_topic_data["result"]:
-        for result_item in author_topic_data["result"]:
-            if "ai_overview" in result_item and result_item["ai_overview"] and result_item["ai_overview"].get("items"):
-                # Concatenate relevant parts of the AI overview if multiple items
-                ai_overview_parts = []
-                for item in result_item["ai_overview"]["items"]:
-                    if item.get("text"):
-                        ai_overview_parts.append(item["text"])
-                if ai_overview_parts:
-                    ai_overview_summary = " ".join(ai_overview_parts).strip()
-                    if len(ai_overview_summary) > 500: # Truncate for display
-                        ai_overview_summary = ai_overview_summary[:500] + "..."
-                    break
+    if author_topic_data_task and "result" in author_topic_data_task:
+        for result_item in author_topic_data_task["result"]:
+            if result_item.get("type") == "ai_overview" and result_item.get("ai_overview"):
+                ai_overview_content = result_item["ai_overview"]
+                if ai_overview_content.get("summary"): # Preferred field for summary text
+                    ai_overview_summary = ai_overview_content["summary"].strip()
+                elif ai_overview_content.get("items"): # Fallback to items if summary is not direct
+                    ai_overview_parts = []
+                    for item_part in ai_overview_content["items"]:
+                        if item_part.get("text"):
+                            ai_overview_parts.append(item_part["text"])
+                    if ai_overview_parts:
+                        ai_overview_summary = " ".join(ai_overview_parts).strip()
+                elif ai_overview_content.get("asynchronous_ai_overview"):
+                    ai_overview_summary = "AI Overview present, content loading dynamically." # Indication it exists but no text yet
+
+                if ai_overview_summary != "N/A" and len(ai_overview_summary) > 500:
+                    ai_overview_summary = ai_overview_summary[:500] + "..."
+                break # Found AI overview, no need to check other result_items
 
     # --- Extract Top Stories Mentions and Topical Associated Domains ---
-    top_stories_mentions = []
-    topical_associated_domains = set()
-
-    if "result" in author_topic_data and author_topic_data["result"]:
-        for result_item in author_topic_data["result"]:
+    if author_topic_data_task and "result" in author_topic_data_task:
+        for result_item in author_topic_data_task["result"]:
             # Check for Top Stories
             if result_item.get("type") == "top_stories" and result_item.get("items"):
                 for news_item in result_item["items"]:
-                    if author.lower() in news_item.get("title", "").lower() or author.lower() in news_item.get("description", "").lower():
+                    # Check if author's full name or parts are in title/description
+                    if (author.lower() in news_item.get("title", "").lower() or 
+                        author.lower() in news_item.get("description", "").lower()):
                         top_stories_mentions.append(news_item.get("domain"))
 
             # Extract domains from organic results that mention the author in context of the topic
@@ -187,7 +204,8 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
                     if item.get("type") == "organic" and "domain" in item:
                         domain = item["domain"]
                         # Check if author name is present in title or description AND not a generic domain
-                        if (author.lower() in item.get("title", "").lower() or author.lower() in item.get("description", "").lower()) and \
+                        if (author.lower() in item.get("title", "").lower() or 
+                            author.lower() in item.get("description", "").lower()) and \
                            not any(re.search(pattern, domain) for pattern in EXCLUDED_GENERIC_DOMAINS_REGEX):
                             topical_associated_domains.add(domain)
 
@@ -342,7 +360,7 @@ with st.sidebar:
                         len(matched_uk_publishers_general), # General publishers
                         len(top_stories_mentions), # New
                         len([d for d in topical_associated_domains if d in UK_PUBLISHER_DOMAINS]), # Count topical publishers
-                        ai_overview_summary != "N/A" # AI overview exists
+                        ai_overview_summary != "N/A" and "content loading dynamically" not in ai_overview_summary # AI overview exists and has content
                     )
 
                     st.session_state['single_author_display_results'] = pd.DataFrame([{
@@ -422,12 +440,12 @@ if st.session_state['triggered_single_analysis'] and st.session_state['single_au
     
     def highlight_score_color_row(s):
         score_val = s['Quality_Score']
-        if score_val >= 70: # Adjusted thresholds for new scoring
-            return ['background-color: #d4edda'] * len(s) # Light green (High)
+        if score_val >= 70:
+            return ['background-color: #d4edda'] * len(s)
         elif score_val >= 40:
-            return ['background-color: #ffeeba'] * len(s) # Light yellow (Medium)
+            return ['background-color: #ffeeba'] * len(s)
         else:
-            return ['background-color: #f8d7da'] * len(s) # Light red (Low)
+            return ['background-color: #f8d7da'] * len(s)
     
     def highlight_tick_cross_bg_cell(val):
         if '✅' in str(val):
@@ -508,7 +526,7 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
                     len(matched_uk_publishers_general),
                     len(top_stories_mentions),
                     len([d for d in topical_associated_domains if d in UK_PUBLISHER_DOMAINS]),
-                    ai_overview_summary != "N/A"
+                    ai_overview_summary != "N/A" and "content loading dynamically" not in ai_overview_summary # AI overview exists and has content
                 )
 
                 results.append({
@@ -557,7 +575,7 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
     st.markdown("---")
     st.markdown("### Detailed Results Table")
     
-    def highlight_score_color_cell_bulk(val): # Renamed to avoid local conflict
+    def highlight_score_color_cell_bulk(val):
         score_val = int(val) 
         if score_val >= 70:
             return 'background-color: #d4edda' 
@@ -566,7 +584,7 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
         else:
             return 'background-color: #f8d7da' 
 
-    def highlight_tick_cross_bg_cell_bulk(val): # Renamed
+    def highlight_tick_cross_bg_cell_bulk(val):
         if '✅' in str(val):
             return 'background-color: #e0ffe0' 
         elif '❌' in str(val):
