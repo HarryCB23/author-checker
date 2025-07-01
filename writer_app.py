@@ -126,21 +126,20 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
         {"keyword": topic_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"}
     ]
     
-    # make_dataforseo_call is set up to handle a list of payloads, so this is good.
     batch_data_response = make_dataforseo_call(payloads)
 
-    author_topic_data_task = None
-    topic_only_data_task = None
+    # Initialize task data to empty dicts to prevent NoneType errors
+    author_topic_data_task = {}
+    topic_only_data_task = {}
 
     if batch_data_response and "tasks" in batch_data_response:
-        for i, task in enumerate(batch_data_response["tasks"]):
-            if task.get("data", {}).get("keyword") == author_topic_query and "result" in task:
+        for task in batch_data_response["tasks"]:
+            # DataForSEO task keyword is usually direct, not nested under 'data'
+            if task.get("keyword") == author_topic_query and "result" in task:
                 author_topic_data_task = task
-            elif task.get("data", {}).get("keyword") == topic_query and "result" in task:
+            elif task.get("keyword") == topic_query and "result" in task:
                 topic_only_data_task = task
-            # If both are found, break early
-            if author_topic_data_task and topic_only_data_task:
-                break
+            # We don't need to break here, as we iterate all tasks and assign if found
 
     # Initialize defaults
     author_topic_results_count = 0
@@ -150,16 +149,17 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
     topical_associated_domains = set()
 
     # --- Extract Topical Authority Results Count ---
-    if author_topic_data_task and "result" in author_topic_data_task:
+    # Safely access 'result' and then iterate
+    if "result" in author_topic_data_task and author_topic_data_task["result"]:
         for result_item in author_topic_data_task["result"]:
             author_topic_results_count = result_item.get("serp", {}).get("results_count", 0)
-            if author_topic_results_count > 0: # Found the count, can break
+            if author_topic_results_count > 0:
                 break
 
-    if topic_only_data_task and "result" in topic_only_data_task:
+    if "result" in topic_only_data_task and topic_only_data_task["result"]:
         for result_item in topic_only_data_task["result"]:
             total_topic_results_count = result_item.get("serp", {}).get("results_count", 0)
-            if total_topic_results_count > 0: # Found the count, can break
+            if total_topic_results_count > 0:
                 break
 
     topical_authority_ratio = 0.0
@@ -167,7 +167,7 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
         topical_authority_ratio = (author_topic_results_count / total_topic_results_count) * 100
 
     # --- Extract AI Overview ---
-    if author_topic_data_task and "result" in author_topic_data_task:
+    if "result" in author_topic_data_task and author_topic_data_task["result"]:
         for result_item in author_topic_data_task["result"]:
             if result_item.get("type") == "ai_overview" and result_item.get("ai_overview"):
                 ai_overview_content = result_item["ai_overview"]
@@ -188,7 +188,7 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
                 break # Found AI overview, no need to check other result_items
 
     # --- Extract Top Stories Mentions and Topical Associated Domains ---
-    if author_topic_data_task and "result" in author_topic_data_task:
+    if "result" in author_topic_data_task and author_topic_data_task["result"]:
         for result_item in author_topic_data_task["result"]:
             # Check for Top Stories
             if result_item.get("type") == "top_stories" and result_item.get("items"):
@@ -526,7 +526,7 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
                     len(matched_uk_publishers_general),
                     len(top_stories_mentions),
                     len([d for d in topical_associated_domains if d in UK_PUBLISHER_DOMAINS]),
-                    ai_overview_summary != "N/A" and "content loading dynamically" not in ai_overview_summary # AI overview exists and has content
+                    ai_overview_summary != "N/A" and "content loading dynamically" not in ai_overview_summary
                 )
 
                 results.append({
