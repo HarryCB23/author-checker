@@ -26,7 +26,7 @@ UK_PUBLISHER_DOMAINS = [
     "standard.co.uk",
     "dailymail.co.uk",
     "independent.co.uk",
-    "thesun.co.uk", # Corrected for .co.uk
+    "thesun.co.uk",
     "mirror.co.uk",
     "metro.co.uk",
     "gbnews.com"
@@ -254,7 +254,7 @@ with st.sidebar:
             - **Be specific:** "smartwatch reviews" not just "watches".
             - **Focus on expertise:** "AI ethics" not just "AI".
             - **Combine terms (if complex):** "Dr. Jane Smith diabetes research".
-            - **Avoid overly broad terms** that might dilute relevance.
+            **Avoid overly broad terms** that might dilute relevance.
             """)
         single_author_url = st.text_input("Optional: Author Profile URL (e.g., Telegraph, personal site):", key="single_author_url_input", help="e.g., telegraph.co.uk/authors/jane-doe, or author's personal website.")
         
@@ -361,7 +361,7 @@ if st.session_state['triggered_single_analysis'] and st.session_state['single_au
     
     # Define styling functions here to ensure they are properly scoped for single display
     def highlight_score_color_row(s):
-        score_val = s['Quality_Score'] # Quality_Score is already int
+        score_val = s['Quality_Score'] # Access directly, as 's' is the Series (row)
         if isinstance(score_val, str):
             score_val = int(score_val.replace(',', '')) # Handle comma if already formatted as string
         
@@ -391,13 +391,7 @@ if st.session_state['triggered_single_analysis'] and st.session_state['single_au
             return f'<a href="{val}" target="_blank">Link</a>'
         return val
     
-    # Apply format specifically to Wikipedia_URL with escape=False
-    # Then apply format for numeric values using .format() without the escape parameter
-    styled_single_df = styled_single_df.format(make_clickable_wikipedia, subset=['Wikipedia_URL'], escape=False) \
-        .format(subset=['Topical_Authority_SERP_Count', 'Scholar_Citations_Count',
-                       'LinkedIn_Followers', 'X_Followers', 'Instagram_Followers',
-                       'TikTok_Followers', 'Facebook_Followers', 'Topical_Authority_Ratio'], formatter='{:}')
-
+    styled_single_df = styled_single_df.format(make_clickable_wikipedia, subset=['Wikipedia_URL'], escape=False)
 
     st.dataframe(styled_single_df, use_container_width=True)
 
