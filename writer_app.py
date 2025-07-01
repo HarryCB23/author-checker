@@ -290,22 +290,22 @@ with st.sidebar:
                         "Author": single_author_name,
                         "Keyword": single_keyword_topic,
                         "Author_URL": single_author_url,
-                        "Quality_Score": quality_score, # Keep as int for styling to work smoothly
+                        "Quality_Score": quality_score,
                         "Has_Knowledge_Panel": "✅ Yes" if kp_exists else "❌ No",
-                        "KP_Details": kp_details, # For more detail if needed, could be hidden in expander
+                        "KP_Details": kp_details,
                         "Has_Wikipedia_Page": "✅ Yes" if wiki_exists else "❌ No",
-                        "Wikipedia_Details": wiki_details, # Keep original detail
-                        "Wikipedia_URL": wiki_url if wiki_exists else "N/A", # New URL field
-                        "Topical_Authority_SERP_Count": f"{topical_authority_serp_count:,}",
-                        "Topical_Authority_Ratio": f"{topical_authority_ratio:.2f}%", # New ratio field
-                        "Scholar_Citations_Count": f"{scholar_citations_count:,}",
+                        "Wikipedia_Details": wiki_details,
+                        "Wikipedia_URL": wiki_url if wiki_exists else "N/A",
+                        "Topical_Authority_SERP_Count": topical_authority_serp_count, # Keep as int/float
+                        "Topical_Authority_Ratio": topical_authority_ratio, # Keep as float
+                        "Scholar_Citations_Count": scholar_citations_count, # Keep as int
                         "Matched_UK_Publishers": ", ".join(matched_uk_publishers) if matched_uk_publishers else "None",
                         "All_Associated_Domains": ", ".join(all_associated_domains),
-                        "LinkedIn_Followers": f"{single_linkedin_followers:,}",
-                        "X_Followers": f"{single_x_followers:,}",
-                        "Instagram_Followers": f"{single_instagram_followers:,}",
-                        "TikTok_Followers": f"{single_tiktok_followers:,}",
-                        "Facebook_Followers": f"{single_facebook_followers:,}",
+                        "LinkedIn_Followers": single_linkedin_followers, # Keep as int
+                        "X_Followers": single_x_followers, # Keep as int
+                        "Instagram_Followers": single_instagram_followers, # Keep as int
+                        "TikTok_Followers": single_tiktok_followers, # Keep as int
+                        "Facebook_Followers": single_facebook_followers, # Keep as int
                     }])
                     st.session_state['triggered_single_analysis'] = True # Set flag to display
             else:
@@ -362,8 +362,7 @@ if st.session_state['triggered_single_analysis'] and st.session_state['single_au
     # Define styling functions here to ensure they are properly scoped for single display
     def highlight_score_color_row(s):
         score_val = s['Quality_Score'] # Access directly, as 's' is the Series (row)
-        if isinstance(score_val, str):
-            score_val = int(score_val.replace(',', '')) # Handle comma if already formatted as string
+        # Removed the string conversion check, assume it's an int now.
         
         if score_val >= 30:
             return ['background-color: #d4edda'] * len(s) # Light green
@@ -385,15 +384,23 @@ if st.session_state['triggered_single_analysis'] and st.session_state['single_au
             return f'<a href="{val}" target="_blank">Link</a>'
         return val
 
+    # Correct formatting for numerical columns:
     styled_single_df = st.session_state['single_author_display_results'].style.apply(
         highlight_score_color_row, axis=1 # Use axis=1 for row-wise application
     ).applymap(
         highlight_tick_cross_bg_cell,
         subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page']
     ).format(make_clickable_wikipedia, subset=['Wikipedia_URL'], escape=False) \
-    .format(subset=['Topical_Authority_SERP_Count', 'Scholar_Citations_Count',
-                   'LinkedIn_Followers', 'X_Followers', 'Instagram_Followers',
-                   'TikTok_Followers', 'Facebook_Followers', 'Topical_Authority_Ratio'], formatter='{:}')
+    .format({ # Use a dictionary for specific formatters
+        'Topical_Authority_SERP_Count': "{:,.0f}", # Format as integer with commas
+        'Topical_Authority_Ratio': "{:.2f}%",
+        'Scholar_Citations_Count': "{:,.0f}",
+        'LinkedIn_Followers': "{:,.0f}",
+        'X_Followers': "{:,.0f}",
+        'Instagram_Followers': "{:,.0f}",
+        'TikTok_Followers': "{:,.0f}",
+        'Facebook_Followers': "{:,.0f}"
+    })
 
 
     st.dataframe(styled_single_df, use_container_width=True)
@@ -451,22 +458,22 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
                     "Author": author,
                     "Keyword": keyword,
                     "Author_URL": author_url,
-                    "Quality_Score": quality_score, # Keep as int for styling to work smoothly
+                    "Quality_Score": quality_score, # Keep as int
                     "Has_Knowledge_Panel": "✅ Yes" if kp_exists else "❌ No",
                     "KP_Details": kp_details,
                     "Has_Wikipedia_Page": "✅ Yes" if wiki_exists else "❌ No",
                     "Wikipedia_Details": wiki_details,
-                    "Wikipedia_URL": wiki_url if wiki_exists else "N/A", # New URL field
-                    "Topical_Authority_SERP_Count": f"{topical_authority_serp_count:,}",
-                    "Topical_Authority_Ratio": f"{topical_authority_ratio:.2f}%", # New ratio field
-                    "Scholar_Citations_Count": f"{scholar_citations_count:,}",
+                    "Wikipedia_URL": wiki_url if wiki_exists else "N/A",
+                    "Topical_Authority_SERP_Count": topical_authority_serp_count, # Keep as int
+                    "Topical_Authority_Ratio": topical_authority_ratio, # Keep as float
+                    "Scholar_Citations_Count": scholar_citations_count, # Keep as int
                     "Matched_UK_Publishers": ", ".join(matched_uk_publishers) if matched_uk_publishers else "None",
                     "All_Associated_Domains": ", ".join(all_associated_domains),
-                    "LinkedIn_Followers": f"{linkedin_followers:,}",
-                    "X_Followers": f"{x_followers:,}",
-                    "Instagram_Followers": f"{instagram_followers:,}",
-                    "TikTok_Followers": f"{tiktok_followers:,}",
-                    "Facebook_Followers": f"{facebook_followers:,}",
+                    "LinkedIn_Followers": linkedin_followers, # Keep as int
+                    "X_Followers": x_followers, # Keep as int
+                    "Instagram_Followers": instagram_followers, # Keep as int
+                    "TikTok_Followers": tiktok_followers, # Keep as int
+                    "Facebook_Followers": facebook_followers, # Keep as int
                 })
                 time.sleep(1) # Small delay to be mindful of API rate limits and display updates
 
@@ -509,18 +516,26 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
             return 'background-color: #fff0f0' 
         return ''
     
-    def make_clickable_wikipedia_bulk(val): # Renamed to avoid conflict if both definitions were in play
+    def make_clickable_wikipedia_bulk(val):
         if val and val != "N/A":
             return f'<a href="{val}" target="_blank">Link</a>'
         return val
 
+    # Correct formatting for numerical columns:
     styled_df = results_df.style \
         .map(highlight_score_color_cell, subset=['Quality_Score']) \
         .applymap(highlight_tick_cross_bg_cell, subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page']) \
         .format(make_clickable_wikipedia_bulk, subset=['Wikipedia_URL'], escape=False) \
-        .format(subset=['Topical_Authority_SERP_Count', 'Scholar_Citations_Count',
-                       'LinkedIn_Followers', 'X_Followers', 'Instagram_Followers',
-                       'TikTok_Followers', 'Facebook_Followers', 'Topical_Authority_Ratio'], formatter='{:}')
+        .format({ # Use a dictionary for specific formatters
+            'Topical_Authority_SERP_Count': "{:,.0f}", # Format as integer with commas
+            'Topical_Authority_Ratio': "{:.2f}%",
+            'Scholar_Citations_Count': "{:,.0f}",
+            'LinkedIn_Followers': "{:,.0f}",
+            'X_Followers': "{:,.0f}",
+            'Instagram_Followers': "{:,.0f}",
+            'TikTok_Followers': "{:,.0f}",
+            'Facebook_Followers': "{:,.0f}"
+        })
 
     st.dataframe(styled_df, use_container_width=True, height=500) 
 
