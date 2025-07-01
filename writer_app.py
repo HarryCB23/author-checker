@@ -31,11 +31,27 @@ UK_PUBLISHER_DOMAINS = [
     "telegraph.co.uk" # Ensure Telegraph itself is considered a major publisher
 ]
 EXCLUDED_GENERIC_DOMAINS_REGEX = [
-    r"wikipedia\.org", r"linkedin\.com", r"twitter\.com", r"x\.com",
+    r"wikipedia\.org", r"linkedin\.com", r"twitter\.com", r"x\.com", # X (Twitter) and Twitter
     r"facebook\.com", r"instagram\.com", r"youtube\.com", r"pinterest\.com",
     r"tiktok\.com", r"medium\.com", r"quora\.com", r"reddit\.com",
     r"threads\.net", r"amazon\.", # Keep Amazon excluded
+    r"audible\.com", r"goodreads\.com", r"imdb\.com", r"substack\.com", # Common book/media/blog platforms
+    r"acast\.com", r"apple\.com", r"spotify\.com", r"yahoo\.com", # Podcast/news platforms
+    r"wordpress\.com", r"msn\.com", r"bylinetimes\.com", r"pressreader\.com", # Blogging/news platforms
+    r"champions-speakers\.co.uk", r"thriftbooks\.com", r"abebooks\.com", # Speaker/book sites
+    r"researchgate\.net", r"prowly\.com", r"shutterstock\.com", # Academic/professional sites
+    r"brainyquote\.com", r"fantasticfiction\.com", r"addall\.com", # Quote/book sites
+    r"waterstones\.com", r"penguinrandomhouse\.com", r"penguin\.co\.uk", # Publishers
+    r"barr\.com", r"american\.edu", r"spiked-online\.com", r"news\.sky\.com", # Specific news/company sites
+    r"arrse\.co\.uk", r"mumsnet\.com", r"quora\.com", r"aol\.com", # Forums/Q&A/webmail
+    r"birminghammail\.co\.uk", # Example of another news site to exclude if not a target publisher
+    r"ccn\.com", r"eutoday\.net", # Tech/news sites
+    r"ashenden\.org", r"moneyweek\.com", r"politeia\.co.uk", r"theweek\.com", # Political/commentary sites
+    r"oxfordmail\.co\.uk", r"times-series\.co.uk", r"thenational\.scot", # Local/national news
+    r"sciencedirect\.com", r"hrmagazine\.co.uk", # Professional/academic
+    r"unherd\.com", r"ebay\.com", r"pangobooks\.com", r"gettyimages\.co.uk" # Other common sites
 ]
+
 
 # --- Helper Functions ---
 
@@ -77,17 +93,18 @@ def check_knowledge_panel(author: str) -> tuple[bool, str]:
     if data and "tasks" in data and data["tasks"]:
         for task in data["tasks"]:
             if "result" in task and task["result"]:
-                for result_item in task["result"]:
-                    # Look for knowledge_graph directly within the result_item
-                    if "knowledge_graph" in result_item and result_item["knowledge_graph"]:
+                for result_type_block in task["result"]: # Iterate through blocks like 'organic', 'knowledge_graph'
+                    # The knowledge_graph is often a top-level item in the 'result' list
+                    if result_type_block.get("type") == "knowledge_graph" and result_type_block.get("title") == author:
                         return True, "Knowledge Panel found"
-                    # Also check for it as a specific item type within 'items'
-                    if "items" in result_item:
-                        for item in result_item["items"]:
-                            if item.get("type") == "knowledge_graph":
+                    # Also check for it nested under 'items' if the structure varies
+                    if "items" in result_type_block:
+                        for item in result_type_block["items"]:
+                            if item.get("type") == "knowledge_graph" and item.get("title") == author:
                                 return True, "Knowledge Panel found"
         return False, "No Knowledge Panel found in SERP results"
     return False, data.get("error", "No data or task in DataForSEO response.")
+
 
 @st.cache_data(ttl=3600)
 def check_wikipedia(author: str) -> tuple[bool, str, str]:
@@ -110,20 +127,22 @@ def check_wikipedia(author: str) -> tuple[bool, str, str]:
         return False, f"An unexpected error occurred checking Wikipedia: {e}", ""
 
 @st.cache_data(ttl=3600)
-def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list[str], list[str]]:
+def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list[str], list[str], list[str]]: # Added list for perspectives
     """
     Analyzes the SERP for 'author AND topic' to get topical authority metrics,
-    AI Overview, and topic-specific associated brands.
+    AI Overview, top stories, topic-specific associated brands, and perspectives.
     """
     if not topic:
-        return 0, 0.0, "N/A", [], [] # No topic provided
+        return 0, 0.0, "N/A", [], [], [] # Added empty list for perspectives
 
     author_topic_query = f'"{author}" AND "{topic}"'
     topic_query = f'"{topic}"'
+    author_only_query = f'"{author}"' # For perspectives that might only appear on author search
 
     payloads = [
         {"keyword": author_topic_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"},
-        {"keyword": topic_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"}
+        {"keyword": topic_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"},
+        {"keyword": author_only_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"} # For author-specific perspectives
     ]
     
     batch_data_response = make_dataforseo_call(payloads)
@@ -131,15 +150,17 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
     # Initialize task data to empty dicts to prevent NoneType errors
     author_topic_data_task = {}
     topic_only_data_task = {}
+    author_only_data_task = {} # New
 
     if batch_data_response and "tasks" in batch_data_response:
         for task in batch_data_response["tasks"]:
-            # DataForSEO task keyword is usually direct, not nested under 'data'
-            if task.get("keyword") == author_topic_query and "result" in task:
+            keyword_in_task = task.get("keyword") # Correctly get keyword directly from task
+            if keyword_in_task == author_topic_query and "result" in task:
                 author_topic_data_task = task
-            elif task.get("keyword") == topic_query and "result" in task:
+            elif keyword_in_task == topic_query and "result" in task:
                 topic_only_data_task = task
-            # No need to break here, as we iterate all tasks and assign if found
+            elif keyword_in_task == author_only_query and "result" in task: # New
+                author_only_data_task = task
 
     # Initialize defaults
     author_topic_results_count = 0
@@ -147,9 +168,9 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
     ai_overview_summary = "N/A"
     top_stories_mentions = []
     topical_associated_domains = set()
+    perspectives_domains = set() # New
 
     # --- Extract Topical Authority Results Count ---
-    # Safely access 'result' and then iterate
     if "result" in author_topic_data_task and author_topic_data_task["result"]:
         for result_item in author_topic_data_task["result"]:
             # DataForSEO often puts total results count directly under 'serp' in a top-level result item
@@ -214,9 +235,18 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
                             author.lower() in item.get("description", "").lower()) and \
                            not any(re.search(pattern, domain) for pattern in EXCLUDED_GENERIC_DOMAINS_REGEX):
                             topical_associated_domains.add(domain)
-
+                            
+    # --- Extract Perspectives Domains (from author_only_data_task as well, as they often show there) ---
+    for data_task in [author_topic_data_task, author_only_data_task]: # Check both relevant tasks
+        if "result" in data_task and data_task["result"]:
+            for result_item in data_task["result"]:
+                if result_item.get("type") == "perspectives" and result_item.get("items"):
+                    for perspective_item in result_item["items"]:
+                        if perspective_item.get("domain"):
+                            perspectives_domains.add(perspective_item["domain"])
+    
     return (author_topic_results_count, topical_authority_ratio, ai_overview_summary,
-            sorted(list(set(top_stories_mentions))), sorted(list(topical_associated_domains)))
+            sorted(list(set(top_stories_mentions))), sorted(list(topical_associated_domains)), sorted(list(perspectives_domains)))
 
 
 @st.cache_data(ttl=3600)
@@ -273,13 +303,15 @@ def calculate_quality_score(
     general_matched_uk_publishers_count: int, # Renamed for clarity
     top_stories_mentions_count: int, # New
     topical_matched_uk_publishers_count: int, # New
-    ai_overview_present: bool # New
+    ai_overview_present: bool, # New
+    perspectives_count: int # New
 ) -> int:
     """Calculates a quality score based on various signals."""
     score = 0
     if has_kp: score += 15
     if has_wiki: score += 10
     if ai_overview_present: score += 10 # Significant boost for AI overview
+    if perspectives_count > 0: score += min(perspectives_count * 2, 8) # Points for perspectives, capped at 8
 
     score += min(int(topical_authority_ratio * 1), 15) # Max 15 points for topical ratio (e.g., 1 point per %)
     
@@ -354,7 +386,7 @@ with st.sidebar:
                     
                     # Consolidated topical SERP analysis
                     topical_authority_serp_count, topical_authority_ratio, ai_overview_summary, \
-                        top_stories_mentions, topical_associated_domains = analyze_topical_serp(single_author_name, single_keyword_topic)
+                        top_stories_mentions, topical_associated_domains, perspectives_domains = analyze_topical_serp(single_author_name, single_keyword_topic)
 
                     all_associated_domains_general, matched_uk_publishers_general = get_author_associated_brands(single_author_name)
                     scholar_citations_count = check_google_scholar_citations(single_author_name)
@@ -366,7 +398,8 @@ with st.sidebar:
                         len(matched_uk_publishers_general), # General publishers
                         len(top_stories_mentions), # New
                         len([d for d in topical_associated_domains if d in UK_PUBLISHER_DOMAINS]), # Count topical publishers
-                        ai_overview_summary != "N/A" and "content loading dynamically" not in ai_overview_summary # AI overview exists and has content
+                        ai_overview_summary != "N/A" and "content loading dynamically" not in ai_overview_summary, # AI overview exists and has content
+                        len(perspectives_domains) # New
                     )
 
                     st.session_state['single_author_display_results'] = pd.DataFrame([{
@@ -383,6 +416,7 @@ with st.sidebar:
                         "Topical_Authority_SERP_Count": topical_authority_serp_count,
                         "Topical_Authority_Ratio": topical_authority_ratio,
                         "Top_Stories_Mentions_Domains": ", ".join(top_stories_mentions) if top_stories_mentions else "None", # New
+                        "Perspectives_Domains": ", ".join(perspectives_domains) if perspectives_domains else "None", # New
                         "Scholar_Citations_Count": scholar_citations_count,
                         "General_Matched_UK_Publishers": ", ".join(matched_uk_publishers_general) if matched_uk_publishers_general else "None", # Renamed
                         "Topic_Associated_Domains": ", ".join(topical_associated_domains) if topical_associated_domains else "None", # New
@@ -520,7 +554,7 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
                 wiki_exists, wiki_details, wiki_url = check_wikipedia(author)
                 
                 topical_authority_serp_count, topical_authority_ratio, ai_overview_summary, \
-                    top_stories_mentions, topical_associated_domains = analyze_topical_serp(author, keyword)
+                    top_stories_mentions, topical_associated_domains, perspectives_domains = analyze_topical_serp(author, keyword)
 
                 all_associated_domains_general, matched_uk_publishers_general = get_author_associated_brands(author)
                 scholar_citations_count = check_google_scholar_citations(author)
@@ -532,7 +566,8 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
                     len(matched_uk_publishers_general),
                     len(top_stories_mentions),
                     len([d for d in topical_associated_domains if d in UK_PUBLISHER_DOMAINS]),
-                    ai_overview_summary != "N/A" and "content loading dynamically" not in ai_overview_summary
+                    ai_overview_summary != "N/A" and "content loading dynamically" not in ai_overview_summary,
+                    len(perspectives_domains)
                 )
 
                 results.append({
@@ -549,6 +584,7 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
                     "Topical_Authority_SERP_Count": topical_authority_serp_count,
                     "Topical_Authority_Ratio": topical_authority_ratio,
                     "Top_Stories_Mentions_Domains": ", ".join(top_stories_mentions) if top_stories_mentions else "None",
+                    "Perspectives_Domains": ", ".join(perspectives_domains) if perspectives_domains else "None",
                     "Scholar_Citations_Count": scholar_citations_count,
                     "General_Matched_UK_Publishers": ", ".join(matched_uk_publishers_general) if matched_uk_publishers_general else "None",
                     "Topic_Associated_Domains": ", ".join(topical_associated_domains) if topical_associated_domains else "None",
