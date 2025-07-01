@@ -26,8 +26,8 @@ UK_PUBLISHER_DOMAINS = [
     "standard.co.uk",
     "dailymail.co.uk",
     "independent.co.uk",
+    "thesun.co.uk", # Corrected for .co.uk
     "mirror.co.uk",
-    "thesun.co.uk",
     "metro.co.uk",
     "gbnews.com"
 ]
