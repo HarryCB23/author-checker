@@ -360,11 +360,8 @@ if st.session_state['triggered_single_analysis'] and st.session_state['single_au
     st.subheader("Individual Author Analysis Results")
     
     # Define styling functions here to ensure they are properly scoped for single display
-    # This function expects a Series (row) as input and returns a list of styles for the cells in that row.
     def highlight_score_color_row(s):
-        # Access the 'Quality_Score' value directly from the Series 's'
-        score_val = s['Quality_Score'] # This will give the actual value, not a Series
-        # Ensure it's an int if it somehow got converted
+        score_val = s['Quality_Score'] # Quality_Score is already int
         if isinstance(score_val, str):
             score_val = int(score_val.replace(',', '')) # Handle comma if already formatted as string
         
@@ -375,7 +372,6 @@ if st.session_state['triggered_single_analysis'] and st.session_state['single_au
         else:
             return ['background-color: #f8d7da'] * len(s) # Light red
     
-    # This function expects a single cell value as input
     def highlight_tick_cross_bg_cell(val):
         if '✅' in str(val):
             return 'background-color: #e0ffe0' # Very light green
@@ -395,7 +391,13 @@ if st.session_state['triggered_single_analysis'] and st.session_state['single_au
             return f'<a href="{val}" target="_blank">Link</a>'
         return val
     
-    styled_single_df = styled_single_df.format(make_clickable_wikipedia, subset=['Wikipedia_URL'], escape=False)
+    # Apply format specifically to Wikipedia_URL with escape=False
+    # Then apply format for numeric values using .format() without the escape parameter
+    styled_single_df = styled_single_df.format(make_clickable_wikipedia, subset=['Wikipedia_URL'], escape=False) \
+        .format(subset=['Topical_Authority_SERP_Count', 'Scholar_Citations_Count',
+                       'LinkedIn_Followers', 'X_Followers', 'Instagram_Followers',
+                       'TikTok_Followers', 'Facebook_Followers', 'Topical_Authority_Ratio'], formatter='{:}')
+
 
     st.dataframe(styled_single_df, use_container_width=True)
 
