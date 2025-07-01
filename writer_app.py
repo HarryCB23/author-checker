@@ -304,7 +304,7 @@ with st.sidebar:
                         "LinkedIn_Followers": f"{single_linkedin_followers:,}",
                         "X_Followers": f"{single_x_followers:,}",
                         "Instagram_Followers": f"{single_instagram_followers:,}",
-                        "TikTok_Followers": f"{tiktok_followers:,}",
+                        "TikTok_Followers": f"{single_tiktok_followers:,}",
                         "Facebook_Followers": f"{single_facebook_followers:,}",
                     }])
                     st.session_state['triggered_single_analysis'] = True # Set flag to display
