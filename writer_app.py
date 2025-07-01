@@ -26,7 +26,7 @@ UK_PUBLISHER_DOMAINS = [
     "standard.co.uk",
     "dailymail.co.uk",
     "independent.co.uk",
-    "thesun.co.uk",
+    "thesun.co.uk", # Corrected for .co.uk
     "mirror.co.uk",
     "metro.co.uk",
     "gbnews.com"
@@ -304,7 +304,7 @@ with st.sidebar:
                         "LinkedIn_Followers": f"{single_linkedin_followers:,}",
                         "X_Followers": f"{single_x_followers:,}",
                         "Instagram_Followers": f"{single_instagram_followers:,}",
-                        "TikTok_Followers": f"{single_tiktok_followers:,}",
+                        "TikTok_Followers": f"{tiktok_followers:,}",
                         "Facebook_Followers": f"{single_facebook_followers:,}",
                     }])
                     st.session_state['triggered_single_analysis'] = True # Set flag to display
@@ -379,19 +379,22 @@ if st.session_state['triggered_single_analysis'] and st.session_state['single_au
             return 'background-color: #fff0f0' # Very light red
         return ''
 
+    # Define make_clickable_wikipedia here for single display as well
+    def make_clickable_wikipedia(val):
+        if val and val != "N/A":
+            return f'<a href="{val}" target="_blank">Link</a>'
+        return val
+
     styled_single_df = st.session_state['single_author_display_results'].style.apply(
         highlight_score_color_row, axis=1 # Use axis=1 for row-wise application
     ).applymap(
         highlight_tick_cross_bg_cell,
         subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page']
-    )
-    # Custom format Wikipedia URL to be clickable
-    def make_clickable_wikipedia(val):
-        if val and val != "N/A":
-            return f'<a href="{val}" target="_blank">Link</a>'
-        return val
-    
-    styled_single_df = styled_single_df.format(make_clickable_wikipedia, subset=['Wikipedia_URL'], escape=False)
+    ).format(make_clickable_wikipedia, subset=['Wikipedia_URL'], escape=False) \
+    .format(subset=['Topical_Authority_SERP_Count', 'Scholar_Citations_Count',
+                   'LinkedIn_Followers', 'X_Followers', 'Instagram_Followers',
+                   'TikTok_Followers', 'Facebook_Followers', 'Topical_Authority_Ratio'], formatter='{:}')
+
 
     st.dataframe(styled_single_df, use_container_width=True)
 
@@ -506,7 +509,7 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
             return 'background-color: #fff0f0' 
         return ''
     
-    def make_clickable_wikipedia(val):
+    def make_clickable_wikipedia_bulk(val): # Renamed to avoid conflict if both definitions were in play
         if val and val != "N/A":
             return f'<a href="{val}" target="_blank">Link</a>'
         return val
@@ -514,7 +517,7 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
     styled_df = results_df.style \
         .map(highlight_score_color_cell, subset=['Quality_Score']) \
         .applymap(highlight_tick_cross_bg_cell, subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page']) \
-        .format(make_clickable_wikipedia, subset=['Wikipedia_URL'], escape=False) \
+        .format(make_clickable_wikipedia_bulk, subset=['Wikipedia_URL'], escape=False) \
         .format(subset=['Topical_Authority_SERP_Count', 'Scholar_Citations_Count',
                        'LinkedIn_Followers', 'X_Followers', 'Instagram_Followers',
                        'TikTok_Followers', 'Facebook_Followers', 'Topical_Authority_Ratio'], formatter='{:}')
