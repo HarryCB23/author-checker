@@ -139,7 +139,7 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
                 author_topic_data_task = task
             elif task.get("keyword") == topic_query and "result" in task:
                 topic_only_data_task = task
-            # We don't need to break here, as we iterate all tasks and assign if found
+            # No need to break here, as we iterate all tasks and assign if found
 
     # Initialize defaults
     author_topic_results_count = 0
@@ -152,14 +152,15 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
     # Safely access 'result' and then iterate
     if "result" in author_topic_data_task and author_topic_data_task["result"]:
         for result_item in author_topic_data_task["result"]:
-            author_topic_results_count = result_item.get("serp", {}).get("results_count", 0)
-            if author_topic_results_count > 0:
-                break
+            # DataForSEO often puts total results count directly under 'serp' in a top-level result item
+            if result_item.get("type") == "organic" and result_item.get("serp"):
+                author_topic_results_count = result_item["serp"].get("results_count", 0)
+                break # Found the count, can break
 
     if "result" in topic_only_data_task and topic_only_data_task["result"]:
         for result_item in topic_only_data_task["result"]:
-            total_topic_results_count = result_item.get("serp", {}).get("results_count", 0)
-            if total_topic_results_count > 0:
+            if result_item.get("type") == "organic" and result_item.get("serp"):
+                total_topic_results_count = result_item["serp"].get("results_count", 0)
                 break
 
     topical_authority_ratio = 0.0
@@ -171,21 +172,26 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
         for result_item in author_topic_data_task["result"]:
             if result_item.get("type") == "ai_overview" and result_item.get("ai_overview"):
                 ai_overview_content = result_item["ai_overview"]
-                if ai_overview_content.get("summary"): # Preferred field for summary text
+                
+                # Check for direct summary text first
+                if ai_overview_content.get("summary"): 
                     ai_overview_summary = ai_overview_content["summary"].strip()
-                elif ai_overview_content.get("items"): # Fallback to items if summary is not direct
+                # Then check for structured items if direct summary isn't present
+                elif ai_overview_content.get("items"):
                     ai_overview_parts = []
                     for item_part in ai_overview_content["items"]:
                         if item_part.get("text"):
                             ai_overview_parts.append(item_part["text"])
                     if ai_overview_parts:
                         ai_overview_summary = " ".join(ai_overview_parts).strip()
+                # If neither summary nor items contain text, but asynchronous_ai_overview is true
                 elif ai_overview_content.get("asynchronous_ai_overview"):
-                    ai_overview_summary = "AI Overview present, content loading dynamically." # Indication it exists but no text yet
-
+                    ai_overview_summary = "AI Overview present (content loading dynamically)." 
+                
                 if ai_overview_summary != "N/A" and len(ai_overview_summary) > 500:
                     ai_overview_summary = ai_overview_summary[:500] + "..."
-                break # Found AI overview, no need to check other result_items
+                break # Found AI overview element, no need to check other result_items
+
 
     # --- Extract Top Stories Mentions and Topical Associated Domains ---
     if "result" in author_topic_data_task and author_topic_data_task["result"]:
