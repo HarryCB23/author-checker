@@ -360,8 +360,14 @@ if st.session_state['triggered_single_analysis'] and st.session_state['single_au
     st.subheader("Individual Author Analysis Results")
     
     # Define styling functions here to ensure they are properly scoped for single display
+    # This function expects a Series (row) as input and returns a list of styles for the cells in that row.
     def highlight_score_color_row(s):
-        score_val = s['Quality_Score'].iloc[0] # Quality_Score is already int
+        # Access the 'Quality_Score' value directly from the Series 's'
+        score_val = s['Quality_Score'] # This will give the actual value, not a Series
+        # Ensure it's an int if it somehow got converted
+        if isinstance(score_val, str):
+            score_val = int(score_val.replace(',', '')) # Handle comma if already formatted as string
+        
         if score_val >= 30:
             return ['background-color: #d4edda'] * len(s) # Light green
         elif score_val >= 15:
@@ -369,6 +375,7 @@ if st.session_state['triggered_single_analysis'] and st.session_state['single_au
         else:
             return ['background-color: #f8d7da'] * len(s) # Light red
     
+    # This function expects a single cell value as input
     def highlight_tick_cross_bg_cell(val):
         if '✅' in str(val):
             return 'background-color: #e0ffe0' # Very light green
@@ -377,7 +384,7 @@ if st.session_state['triggered_single_analysis'] and st.session_state['single_au
         return ''
 
     styled_single_df = st.session_state['single_author_display_results'].style.apply(
-        highlight_score_color_row, axis=1
+        highlight_score_color_row, axis=1 # Use axis=1 for row-wise application
     ).applymap(
         highlight_tick_cross_bg_cell,
         subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page']
@@ -409,14 +416,13 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
     st_spinner_placeholder = st.empty() # Placeholder for a spinner during bulk processing
 
     with st_spinner_placeholder.container(): # Use a container for the spinner and text
-        with st.spinner("Processing your bulk request... This may take some time due to API calls."):
+        with st.spinner("Processing your bulk request... This may be take some time due to API calls."):
             for index, row in bulk_data.iterrows():
                 author = str(row["Author"]).strip()
                 keyword = str(row["Keyword"]).strip() if "Keyword" in bulk_data.columns and pd.notna(row["Keyword"]) else ""
                 
                 # --- ROBUSTLY GET FOLLOWER COUNTS ---
                 # Use .get() with a default of 0, then ensure integer type
-                # These variables are correctly defined for use within this loop's scope
                 linkedin_followers = pd.to_numeric(row.get("LinkedIn_Followers", 0), errors='coerce').fillna(0).astype(int)
                 x_followers = pd.to_numeric(row.get("X_Followers", 0), errors='coerce').fillna(0).astype(int)
                 instagram_followers = pd.to_numeric(row.get("Instagram_Followers", 0), errors='coerce').fillna(0).astype(int)
