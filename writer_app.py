@@ -2,22 +2,20 @@ import streamlit as st
 import requests
 import time
 import pandas as pd
-import re # For regular expressions, useful for extracting domain names
+import re
 
 st.set_page_config(layout="wide", page_title="Author Quality Evaluator")
 
 # --- Configuration & API Endpoints ---
-# Load API credentials from Streamlit secrets
 try:
     API_USERNAME = st.secrets["API_USERNAME"]
     API_PASSWORD = st.secrets["API_PASSWORD"]
 except KeyError as e:
     st.error(f"Missing API secret: {e}. Please configure secrets in Streamlit Cloud dashboard.")
-    st.stop() # Stop the app if secrets are missing
+    st.stop()
 
 DATAFORSEO_ORGANIC_URL = "https://api.dataforseo.com/v3/serp/google/organic/live/regular"
 
-# Define a list of major UK publisher domains for "Associated Brands" check
 UK_PUBLISHER_DOMAINS = [
     "thetimes.com",
     "theguardian.com",
@@ -26,34 +24,39 @@ UK_PUBLISHER_DOMAINS = [
     "standard.co.uk",
     "dailymail.co.uk",
     "independent.co.uk",
-    "thesun.co.uk", # Corrected for .co.uk
+    "thesun.co.uk",
     "mirror.co.uk",
     "metro.co.uk",
-    "gbnews.com"
+    "gbnews.com",
+    "telegraph.co.uk" # Ensure Telegraph itself is considered a major publisher
 ]
-# Exclude these generic domains from "Associated Brands"
 EXCLUDED_GENERIC_DOMAINS_REGEX = [
     r"wikipedia\.org", r"linkedin\.com", r"twitter\.com", r"x\.com",
     r"facebook\.com", r"instagram\.com", r"youtube\.com", r"pinterest\.com",
     r"tiktok\.com", r"medium\.com", r"quora\.com", r"reddit\.com",
-    r"threads\.net", r"telegraph\.co\.uk", # Exclude your own domain
-    r"amazon\." # Exclude Amazon links
+    r"threads\.net", r"amazon\.", # Keep Amazon excluded
+    # Removed telegraph.co.uk from exclusions as it's now in UK_PUBLISHER_DOMAINS
 ]
 
 # --- Helper Functions ---
 
-@st.cache_data(ttl=3600) # Cache results for 1 hour
+@st.cache_data(ttl=3600)
 def make_dataforseo_call(payload: dict) -> dict:
     """Helper function to make DataForSEO API requests."""
     try:
-        # Limit to top 20 results to save credits
-        payload["limit"] = 20
-        # Ensure a list of payloads is sent
+        # Limit to top 20 results to save credits (if not already set)
+        if isinstance(payload, dict) and "limit" not in payload:
+            payload["limit"] = 20
+        elif isinstance(payload, list):
+            for p in payload:
+                if "limit" not in p:
+                    p["limit"] = 20
+
         if not isinstance(payload, list):
             payload = [payload]
 
         response = requests.post(DATAFORSEO_ORGANIC_URL, auth=(API_USERNAME, API_PASSWORD), json=payload, timeout=60)
-        response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
+        response.raise_for_status()
         return response.json()
     except requests.exceptions.HTTPError as http_err:
         error_msg = f"DataForSEO HTTP error ({response.status_code}): {http_err} - {response.text}"
@@ -67,22 +70,28 @@ def make_dataforseo_call(payload: dict) -> dict:
 
 @st.cache_data(ttl=3600)
 def check_knowledge_panel(author: str) -> tuple[bool, str]:
-    """Checks DataForSEO for a Google Knowledge Panel."""
-    search_query = f'"{author}"'
+    """Checks DataForSEO for a Google Knowledge Panel by searching ONLY the author's name."""
+    search_query = f'"{author}"' # Essential: search only author name for KP
     payload = {"keyword": search_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"}
     data = make_dataforseo_call(payload)
 
     if data and "tasks" in data and data["tasks"]:
         for task in data["tasks"]:
             if "result" in task and task["result"]:
-                for result in task["result"]:
-                    if "knowledge_graph" in result and result["knowledge_graph"]:
+                for result_item in task["result"]:
+                    # Look for knowledge_graph directly within the result_item
+                    if "knowledge_graph" in result_item and result_item["knowledge_graph"]:
                         return True, "Knowledge Panel found"
+                    # Also check for it as a specific item type within 'items'
+                    if "items" in result_item:
+                        for item in result_item["items"]:
+                            if item.get("type") == "knowledge_graph":
+                                return True, "Knowledge Panel found"
         return False, "No Knowledge Panel found in SERP results"
     return False, data.get("error", "No data or task in DataForSEO response.")
 
 @st.cache_data(ttl=3600)
-def check_wikipedia(author: str) -> tuple[bool, str, str]: # Added str for URL
+def check_wikipedia(author: str) -> tuple[bool, str, str]:
     """Checks Wikipedia API for a page matching the author's name. Returns (found, message, URL)."""
     wiki_author_query = author.replace(' ', '_')
     wikipedia_api_url = f"https://en.wikipedia.org/w/api.php?action=query&titles={wiki_author_query}&prop=info&inprop=url&format=json"
@@ -102,55 +111,97 @@ def check_wikipedia(author: str) -> tuple[bool, str, str]: # Added str for URL
         return False, f"An unexpected error occurred checking Wikipedia: {e}", ""
 
 @st.cache_data(ttl=3600)
-def get_topical_authority_metrics(author: str, topic: str) -> tuple[int, float]:
+def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list[str], list[str]]:
     """
-    Gets total search results for 'author AND topic' and for 'topic' alone.
-    Calculates topical authority ratio.
+    Analyzes the SERP for 'author AND topic' to get topical authority metrics,
+    AI Overview, and topic-specific associated brands.
     """
     if not topic:
-        return 0, 0.0 # No topic provided
+        return 0, 0.0, "N/A", [], [] # No topic provided
 
-    # 1. Search for "author AND topic"
     author_topic_query = f'"{author}" AND "{topic}"'
-    author_topic_payload = {"keyword": author_topic_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"}
-    author_topic_data = make_dataforseo_call(author_topic_payload)
-    author_topic_results_count = 0
-    if author_topic_data and "tasks" in author_topic_data and author_topic_data["tasks"]:
-        for task in author_topic_data["tasks"]:
-            if "result" in task and task["result"]:
-                for result in task["result"]:
-                    author_topic_results_count = result.get("serp", {}).get("results_count", 0)
-                    break # Assuming first result is sufficient
-            if author_topic_results_count > 0: break # Break outer loop if count found
-
-    # 2. Search for "topic" alone
     topic_query = f'"{topic}"'
-    topic_payload = {"keyword": topic_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"}
-    topic_data = make_dataforseo_call(topic_payload)
+
+    payloads = [
+        {"keyword": author_topic_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"},
+        {"keyword": topic_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"}
+    ]
+    
+    # Make a single batch call for efficiency (if DataForSEO supports it, or sequential if not)
+    # make_dataforseo_call is set up to handle a list of payloads, so this is good.
+    batch_data = make_dataforseo_call(payloads)
+
+    author_topic_data = batch_data["tasks"][0] if batch_data and "tasks" in batch_data and len(batch_data["tasks"]) > 0 else {"error": "No data for author_topic"}
+    topic_only_data = batch_data["tasks"][1] if batch_data and "tasks" in batch_data and len(batch_data["tasks"]) > 1 else {"error": "No data for topic_only"}
+
+    # --- Extract Topical Authority Results Count ---
+    author_topic_results_count = 0
+    if "result" in author_topic_data and author_topic_data["result"]:
+        for result in author_topic_data["result"]:
+            author_topic_results_count = result.get("serp", {}).get("results_count", 0)
+            if author_topic_results_count > 0:
+                break
+
     total_topic_results_count = 0
-    if topic_data and "tasks" in topic_data and topic_data["tasks"]:
-        for task in topic_data["tasks"]:
-            if "result" in task and task["result"]:
-                for result in task["result"]:
-                    total_topic_results_count = result.get("serp", {}).get("results_count", 0)
-                    break
-            if total_topic_results_count > 0: break
+    if "result" in topic_only_data and topic_only_data["result"]:
+        for result in topic_only_data["result"]:
+            total_topic_results_count = result.get("serp", {}).get("results_count", 0)
+            if total_topic_results_count > 0:
+                break
 
-
-    # Calculate ratio
     topical_authority_ratio = 0.0
     if total_topic_results_count > 0:
-        topical_authority_ratio = (author_topic_results_count / total_topic_results_count) * 100 # As a percentage
+        topical_authority_ratio = (author_topic_results_count / total_topic_results_count) * 100
 
-    return author_topic_results_count, topical_authority_ratio
+    # --- Extract AI Overview ---
+    ai_overview_summary = "N/A"
+    if "result" in author_topic_data and author_topic_data["result"]:
+        for result_item in author_topic_data["result"]:
+            if "ai_overview" in result_item and result_item["ai_overview"] and result_item["ai_overview"].get("items"):
+                # Concatenate relevant parts of the AI overview if multiple items
+                ai_overview_parts = []
+                for item in result_item["ai_overview"]["items"]:
+                    if item.get("text"):
+                        ai_overview_parts.append(item["text"])
+                if ai_overview_parts:
+                    ai_overview_summary = " ".join(ai_overview_parts).strip()
+                    if len(ai_overview_summary) > 500: # Truncate for display
+                        ai_overview_summary = ai_overview_summary[:500] + "..."
+                    break
+
+    # --- Extract Top Stories Mentions and Topical Associated Domains ---
+    top_stories_mentions = []
+    topical_associated_domains = set()
+
+    if "result" in author_topic_data and author_topic_data["result"]:
+        for result_item in author_topic_data["result"]:
+            # Check for Top Stories
+            if result_item.get("type") == "top_stories" and result_item.get("items"):
+                for news_item in result_item["items"]:
+                    if author.lower() in news_item.get("title", "").lower() or author.lower() in news_item.get("description", "").lower():
+                        top_stories_mentions.append(news_item.get("domain"))
+
+            # Extract domains from organic results that mention the author in context of the topic
+            if "items" in result_item: # Check if 'items' array is in this result_item
+                for item in result_item["items"]:
+                    if item.get("type") == "organic" and "domain" in item:
+                        domain = item["domain"]
+                        # Check if author name is present in title or description AND not a generic domain
+                        if (author.lower() in item.get("title", "").lower() or author.lower() in item.get("description", "").lower()) and \
+                           not any(re.search(pattern, domain) for pattern in EXCLUDED_GENERIC_DOMAINS_REGEX):
+                            topical_associated_domains.add(domain)
+
+    return (author_topic_results_count, topical_authority_ratio, ai_overview_summary,
+            sorted(list(set(top_stories_mentions))), sorted(list(topical_associated_domains)))
+
 
 @st.cache_data(ttl=3600)
 def get_author_associated_brands(author: str) -> tuple[list[str], list[str]]:
     """
-    Finds unique domains an author is associated with by searching their name.
+    Finds unique domains an author is generally associated with by searching their name.
     Separates into general associated domains and matches with predefined UK publishers.
     """
-    search_query = f'"{author}"'
+    search_query = f'"{author}"' # General search for author's overall brand presence
     payload = {"keyword": search_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"}
     data = make_dataforseo_call(payload)
 
@@ -160,16 +211,13 @@ def get_author_associated_brands(author: str) -> tuple[list[str], list[str]]:
     if data and "tasks" in data and data["tasks"]:
         for task in data["tasks"]:
             if "result" in task and task["result"]:
-                # Iterate through the actual results within the 'result' list
-                for result_item in task["result"]: # Renamed to result_item for clarity
-                    if "items" in result_item: # Check if 'items' array is in this result_item
-                        for item in result_item["items"]: # Now iterate through the actual organic items
+                for result_item in task["result"]:
+                    if "items" in result_item:
+                        for item in result_item["items"]:
                             if item.get("type") == "organic" and "domain" in item:
                                 domain = item["domain"]
-                                # Check against generic exclusions
                                 if not any(re.search(pattern, domain) for pattern in EXCLUDED_GENERIC_DOMAINS_REGEX):
                                     all_associated_domains.add(domain)
-                                # Check against specific UK publishers
                                 if domain in UK_PUBLISHER_DOMAINS:
                                     matched_uk_publishers.add(domain)
 
@@ -191,46 +239,51 @@ def check_google_scholar_citations(author: str) -> int:
 def calculate_quality_score(
     has_kp: bool,
     has_wiki: bool,
-    topical_authority_ratio: float, # Now using ratio
+    topical_authority_ratio: float,
     scholar_citations_count: int,
     linkedin_followers: int,
     x_followers: int,
     instagram_followers: int,
     tiktok_followers: int,
     facebook_followers: int,
-    matched_uk_publishers_count: int,
+    general_matched_uk_publishers_count: int, # Renamed for clarity
+    top_stories_mentions_count: int, # New
+    topical_matched_uk_publishers_count: int, # New
+    ai_overview_present: bool # New
 ) -> int:
     """Calculates a quality score based on various signals."""
     score = 0
-    if has_kp: score += 15 # High value for KP
-    if has_wiki: score += 10 # Good value for Wikipedia
+    if has_kp: score += 15
+    if has_wiki: score += 10
+    if ai_overview_present: score += 10 # Significant boost for AI overview
+
+    score += min(int(topical_authority_ratio * 1), 15) # Max 15 points for topical ratio (e.g., 1 point per %)
     
-    # Scale topical authority ratio: e.g., 1 point per 1% up to 20% capped at 20 points
-    score += min(int(topical_authority_ratio * 2), 20) # 2 points per %
+    score += min(scholar_citations_count // 5, 10) # 1 point per 5 citations, capped at 10 points
 
-    # Scale scholar citations: 1 point per citation, capped at 10 points
-    score += min(scholar_citations_count, 10)
-
-    # Social followers: 1 point per 10k followers across all platforms, capped at 20 points
     total_social_followers = linkedin_followers + x_followers + instagram_followers + tiktok_followers + facebook_followers
-    score += min(total_social_followers // 10000, 20)
+    score += min(total_social_followers // 10000, 10) # Max 10 points for social
 
-    # Points for writing for major UK publishers (2 points per publisher, capped at 10 points)
-    score += min(matched_uk_publishers_count * 2, 10)
+    # General associated brands: 1 point per publisher, capped at 5 points
+    score += min(general_matched_uk_publishers_count * 1, 5)
 
-    return max(0, score) # Ensure score doesn't go negative
+    # Topical associated brands: 2 points per publisher, capped at 10 points (more valuable)
+    score += min(topical_matched_uk_publishers_count * 2, 10)
+
+    if top_stories_mentions_count > 0:
+        score += min(top_stories_mentions_count * 3, 10) # Strong signal, 3 points per mention, capped at 10
+
+    return max(0, min(score, 100)) # Ensure score is between 0 and 100
 
 # --- Main Page Title ---
 st.title("✍️ The Telegraph Recommended: Author Quality Evaluator")
-st.markdown("---") # Separator after title
+st.markdown("---")
 st.markdown("""
 This tool helps assess the perceived authority and expertise of authors based on key online signals,
 supporting the recruitment of high-quality freelancers for The Telegraph Recommended.
 """)
-# --- END Main Page Title ---
 
 # --- Initialize Session State for Results ---
-# This ensures results persist across reruns and are visible in the main section
 if 'single_author_display_results' not in st.session_state:
     st.session_state['single_author_display_results'] = None
 if 'bulk_analysis_results_df' not in st.session_state:
@@ -273,19 +326,25 @@ with st.sidebar:
                 with st.spinner(f"Analyzing '{single_author_name}'... This may take a moment due to API calls."):
                     # API Calls
                     kp_exists, kp_details = check_knowledge_panel(single_author_name)
-                    wiki_exists, wiki_details, wiki_url = check_wikipedia(single_author_name) # Get URL
-                    topical_authority_serp_count, topical_authority_ratio = get_topical_authority_metrics(single_author_name, single_keyword_topic)
-                    all_associated_domains, matched_uk_publishers = get_author_associated_brands(single_author_name)
+                    wiki_exists, wiki_details, wiki_url = check_wikipedia(single_author_name)
+                    
+                    # Consolidated topical SERP analysis
+                    topical_authority_serp_count, topical_authority_ratio, ai_overview_summary, \
+                        top_stories_mentions, topical_associated_domains = analyze_topical_serp(single_author_name, single_keyword_topic)
+
+                    all_associated_domains_general, matched_uk_publishers_general = get_author_associated_brands(single_author_name)
                     scholar_citations_count = check_google_scholar_citations(single_author_name)
                     
                     quality_score = calculate_quality_score(
-                        kp_exists, wiki_exists, topical_authority_ratio, # Pass ratio
+                        kp_exists, wiki_exists, topical_authority_ratio,
                         scholar_citations_count, single_linkedin_followers, single_x_followers,
                         single_instagram_followers, single_tiktok_followers, single_facebook_followers,
-                        len(matched_uk_publishers)
+                        len(matched_uk_publishers_general), # General publishers
+                        len(top_stories_mentions), # New
+                        len([d for d in topical_associated_domains if d in UK_PUBLISHER_DOMAINS]), # Count topical publishers
+                        ai_overview_summary != "N/A" # AI overview exists
                     )
 
-                    # Store results in session state for display in main section
                     st.session_state['single_author_display_results'] = pd.DataFrame([{
                         "Author": single_author_name,
                         "Keyword": single_keyword_topic,
@@ -296,22 +355,25 @@ with st.sidebar:
                         "Has_Wikipedia_Page": "✅ Yes" if wiki_exists else "❌ No",
                         "Wikipedia_Details": wiki_details,
                         "Wikipedia_URL": wiki_url if wiki_exists else "N/A",
-                        "Topical_Authority_SERP_Count": topical_authority_serp_count, # Keep as int/float
-                        "Topical_Authority_Ratio": topical_authority_ratio, # Keep as float
-                        "Scholar_Citations_Count": scholar_citations_count, # Keep as int
-                        "Matched_UK_Publishers": ", ".join(matched_uk_publishers) if matched_uk_publishers else "None",
-                        "All_Associated_Domains": ", ".join(all_associated_domains),
-                        "LinkedIn_Followers": single_linkedin_followers, # Keep as int
-                        "X_Followers": single_x_followers, # Keep as int
-                        "Instagram_Followers": single_instagram_followers, # Keep as int
-                        "TikTok_Followers": single_tiktok_followers, # Keep as int
-                        "Facebook_Followers": single_facebook_followers, # Keep as int
+                        "AI_Overview_Summary": ai_overview_summary, # New
+                        "Topical_Authority_SERP_Count": topical_authority_serp_count,
+                        "Topical_Authority_Ratio": topical_authority_ratio,
+                        "Top_Stories_Mentions_Domains": ", ".join(top_stories_mentions) if top_stories_mentions else "None", # New
+                        "Scholar_Citations_Count": scholar_citations_count,
+                        "General_Matched_UK_Publishers": ", ".join(matched_uk_publishers_general) if matched_uk_publishers_general else "None", # Renamed
+                        "Topic_Associated_Domains": ", ".join(topical_associated_domains) if topical_associated_domains else "None", # New
+                        "All_Associated_Domains_General": ", ".join(all_associated_domains_general), # Renamed
+                        "LinkedIn_Followers": single_linkedin_followers,
+                        "X_Followers": single_x_followers,
+                        "Instagram_Followers": single_instagram_followers,
+                        "TikTok_Followers": single_tiktok_followers,
+                        "Facebook_Followers": single_facebook_followers,
                     }])
-                    st.session_state['triggered_single_analysis'] = True # Set flag to display
+                    st.session_state['triggered_single_analysis'] = True
             else:
                 st.warning("Please enter an author name to analyze.")
 
-    st.markdown("---") # Separator
+    st.markdown("---")
 
     # --- Bulk Author Evaluation (moved to sidebar) ---
     st.subheader("Bulk Author Analysis (CSV Upload)")
@@ -336,7 +398,7 @@ with st.sidebar:
                 st.session_state['bulk_data_to_process'] = None
             else:
                 st.success("CSV uploaded successfully. Click 'Run Bulk Analysis' below.")
-                st.session_state['bulk_data_to_process'] = bulk_data # Store for processing later
+                st.session_state['bulk_data_to_process'] = bulk_data
         except pd.errors.EmptyDataError:
             st.error("The uploaded CSV file is empty.")
             st.session_state['bulk_data_to_process'] = None
@@ -348,51 +410,45 @@ with st.sidebar:
 
     if st.button("Run Bulk Analysis", use_container_width=True, disabled=(st.session_state.get('bulk_data_to_process') is None)):
         if st.session_state['bulk_data_to_process'] is not None:
-            st.session_state['triggered_bulk_analysis'] = True # Set flag to display
-
+            st.session_state['triggered_bulk_analysis'] = True
 
 # --- Main Content Area (Visualization) ---
 st.header("Analysis Results")
-st.markdown("---") # Separator for results section
+st.markdown("---")
 
 # Process and display single author results if triggered
 if st.session_state['triggered_single_analysis'] and st.session_state['single_author_display_results'] is not None:
     st.subheader("Individual Author Analysis Results")
     
-    # Define styling functions here to ensure they are properly scoped for single display
     def highlight_score_color_row(s):
-        score_val = s['Quality_Score'] # Access directly, as 's' is the Series (row)
-        # Removed the string conversion check, assume it's an int now.
-        
-        if score_val >= 30:
-            return ['background-color: #d4edda'] * len(s) # Light green
-        elif score_val >= 15:
-            return ['background-color: #ffeeba'] * len(s) # Light yellow
+        score_val = s['Quality_Score']
+        if score_val >= 70: # Adjusted thresholds for new scoring
+            return ['background-color: #d4edda'] * len(s) # Light green (High)
+        elif score_val >= 40:
+            return ['background-color: #ffeeba'] * len(s) # Light yellow (Medium)
         else:
-            return ['background-color: #f8d7da'] * len(s) # Light red
+            return ['background-color: #f8d7da'] * len(s) # Light red (Low)
     
     def highlight_tick_cross_bg_cell(val):
         if '✅' in str(val):
-            return 'background-color: #e0ffe0' # Very light green
+            return 'background-color: #e0ffe0'
         elif '❌' in str(val):
-            return 'background-color: #fff0f0' # Very light red
+            return 'background-color: #fff0f0'
         return ''
 
-    # Define make_clickable_wikipedia here for single display as well
     def make_clickable_wikipedia(val):
         if val and val != "N/A":
             return f'<a href="{val}" target="_blank">Link</a>'
         return val
 
-    # Correct formatting for numerical columns:
     styled_single_df = st.session_state['single_author_display_results'].style.apply(
-        highlight_score_color_row, axis=1 # Use axis=1 for row-wise application
+        highlight_score_color_row, axis=1
     ).applymap(
         highlight_tick_cross_bg_cell,
         subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page']
     ).format(make_clickable_wikipedia, subset=['Wikipedia_URL'], escape=False) \
-    .format({ # Use a dictionary for specific formatters
-        'Topical_Authority_SERP_Count': "{:,.0f}", # Format as integer with commas
+    .format({
+        'Topical_Authority_SERP_Count': "{:,.0f}",
         'Topical_Authority_Ratio': "{:.2f}%",
         'Scholar_Citations_Count': "{:,.0f}",
         'LinkedIn_Followers': "{:,.0f}",
@@ -402,12 +458,10 @@ if st.session_state['triggered_single_analysis'] and st.session_state['single_au
         'Facebook_Followers': "{:,.0f}"
     })
 
-
     st.dataframe(styled_single_df, use_container_width=True)
 
-    # Reset the trigger after display
     st.session_state['triggered_single_analysis'] = False
-    st.session_state['single_author_display_results'] = None # Clear previous results after display
+    st.session_state['single_author_display_results'] = None
 
 # Process and display bulk analysis results if triggered
 elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data_to_process'] is not None:
@@ -418,23 +472,20 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
     total_authors = len(bulk_data)
     
     progress_bar = st.progress(0)
-    status_text = st.empty() 
-    st_spinner_placeholder = st.empty() # Placeholder for a spinner during bulk processing
+    status_text = st.empty()
+    st_spinner_placeholder = st.empty()
 
-    with st_spinner_placeholder.container(): # Use a container for the spinner and text
-        with st.spinner("Processing your bulk request... This may be take some time due to API calls."):
+    with st_spinner_placeholder.container():
+        with st.spinner("Processing your bulk request... This may take some time due to API calls."):
             for index, row in bulk_data.iterrows():
                 author = str(row["Author"]).strip()
                 keyword = str(row["Keyword"]).strip() if "Keyword" in bulk_data.columns and pd.notna(row["Keyword"]) else ""
                 
-                # --- ROBUSTLY GET FOLLOWER COUNTS ---
-                # Use .get() with a default of 0, then ensure integer type
                 linkedin_followers = pd.to_numeric(row.get("LinkedIn_Followers", 0), errors='coerce').fillna(0).astype(int)
                 x_followers = pd.to_numeric(row.get("X_Followers", 0), errors='coerce').fillna(0).astype(int)
                 instagram_followers = pd.to_numeric(row.get("Instagram_Followers", 0), errors='coerce').fillna(0).astype(int)
                 tiktok_followers = pd.to_numeric(row.get("TikTok_Followers", 0), errors='coerce').fillna(0).astype(int)
                 facebook_followers = pd.to_numeric(row.get("Facebook_Followers", 0), errors='coerce').fillna(0).astype(int)
-                # --- END ROBUST FOLLOWER COUNTS ---
 
                 author_url = str(row["Author_URL"]).strip() if "Author_URL" in bulk_data.columns and pd.notna(row["Author_URL"]) else ""
 
@@ -442,49 +493,56 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
 
                 # API Calls
                 kp_exists, kp_details = check_knowledge_panel(author)
-                wiki_exists, wiki_details, wiki_url = check_wikipedia(author) # Get URL
-                topical_authority_serp_count, topical_authority_ratio = get_topical_authority_metrics(author, keyword)
-                all_associated_domains, matched_uk_publishers = get_author_associated_brands(author)
+                wiki_exists, wiki_details, wiki_url = check_wikipedia(author)
+                
+                topical_authority_serp_count, topical_authority_ratio, ai_overview_summary, \
+                    top_stories_mentions, topical_associated_domains = analyze_topical_serp(author, keyword)
+
+                all_associated_domains_general, matched_uk_publishers_general = get_author_associated_brands(author)
                 scholar_citations_count = check_google_scholar_citations(author)
                 
                 quality_score = calculate_quality_score(
                     kp_exists, wiki_exists, topical_authority_ratio,
                     scholar_citations_count, linkedin_followers, x_followers,
                     instagram_followers, tiktok_followers, facebook_followers,
-                    len(matched_uk_publishers)
+                    len(matched_uk_publishers_general),
+                    len(top_stories_mentions),
+                    len([d for d in topical_associated_domains if d in UK_PUBLISHER_DOMAINS]),
+                    ai_overview_summary != "N/A"
                 )
 
                 results.append({
                     "Author": author,
                     "Keyword": keyword,
                     "Author_URL": author_url,
-                    "Quality_Score": quality_score, # Keep as int
+                    "Quality_Score": quality_score,
                     "Has_Knowledge_Panel": "✅ Yes" if kp_exists else "❌ No",
                     "KP_Details": kp_details,
                     "Has_Wikipedia_Page": "✅ Yes" if wiki_exists else "❌ No",
                     "Wikipedia_Details": wiki_details,
                     "Wikipedia_URL": wiki_url if wiki_exists else "N/A",
-                    "Topical_Authority_SERP_Count": topical_authority_serp_count, # Keep as int
-                    "Topical_Authority_Ratio": topical_authority_ratio, # Keep as float
-                    "Scholar_Citations_Count": scholar_citations_count, # Keep as int
-                    "Matched_UK_Publishers": ", ".join(matched_uk_publishers) if matched_uk_publishers else "None",
-                    "All_Associated_Domains": ", ".join(all_associated_domains),
-                    "LinkedIn_Followers": linkedin_followers, # Keep as int
-                    "X_Followers": x_followers, # Keep as int
-                    "Instagram_Followers": instagram_followers, # Keep as int
-                    "TikTok_Followers": tiktok_followers, # Keep as int
-                    "Facebook_Followers": facebook_followers, # Keep as int
+                    "AI_Overview_Summary": ai_overview_summary,
+                    "Topical_Authority_SERP_Count": topical_authority_serp_count,
+                    "Topical_Authority_Ratio": topical_authority_ratio,
+                    "Top_Stories_Mentions_Domains": ", ".join(top_stories_mentions) if top_stories_mentions else "None",
+                    "Scholar_Citations_Count": scholar_citations_count,
+                    "General_Matched_UK_Publishers": ", ".join(matched_uk_publishers_general) if matched_uk_publishers_general else "None",
+                    "Topic_Associated_Domains": ", ".join(topical_associated_domains) if topical_associated_domains else "None",
+                    "All_Associated_Domains_General": ", ".join(all_associated_domains_general),
+                    "LinkedIn_Followers": linkedin_followers,
+                    "X_Followers": x_followers,
+                    "Instagram_Followers": instagram_followers,
+                    "TikTok_Followers": tiktok_followers,
+                    "Facebook_Followers": facebook_followers,
                 })
-                time.sleep(1) # Small delay to be mindful of API rate limits and display updates
+                time.sleep(1)
 
     results_df = pd.DataFrame(results)
-    st.session_state['bulk_analysis_results_df'] = results_df # Store for display
+    st.session_state['bulk_analysis_results_df'] = results_df
     
-    # Reset flags and data after processing
     st.session_state['triggered_bulk_analysis'] = False
-    st.session_state['bulk_data_to_process'] = None # Clear data after processing
+    st.session_state['bulk_data_to_process'] = None
 
-    # --- Visualisation of Bulk Results ---
     st.markdown("### High-Level Summary")
     col_sum1, col_sum2, col_sum3 = st.columns(3)
     with col_sum1:
@@ -499,17 +557,16 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
     st.markdown("---")
     st.markdown("### Detailed Results Table")
     
-    # Define styling functions here to ensure they are accessible
-    def highlight_score_color_cell(val):
+    def highlight_score_color_cell_bulk(val): # Renamed to avoid local conflict
         score_val = int(val) 
-        if score_val >= 30:
+        if score_val >= 70:
             return 'background-color: #d4edda' 
-        elif score_val >= 15:
+        elif score_val >= 40:
             return 'background-color: #ffeeba' 
         else:
             return 'background-color: #f8d7da' 
 
-    def highlight_tick_cross_bg_cell(val):
+    def highlight_tick_cross_bg_cell_bulk(val): # Renamed
         if '✅' in str(val):
             return 'background-color: #e0ffe0' 
         elif '❌' in str(val):
@@ -521,13 +578,12 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
             return f'<a href="{val}" target="_blank">Link</a>'
         return val
 
-    # Correct formatting for numerical columns:
     styled_df = results_df.style \
-        .map(highlight_score_color_cell, subset=['Quality_Score']) \
-        .applymap(highlight_tick_cross_bg_cell, subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page']) \
+        .map(highlight_score_color_cell_bulk, subset=['Quality_Score']) \
+        .applymap(highlight_tick_cross_bg_cell_bulk, subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page']) \
         .format(make_clickable_wikipedia_bulk, subset=['Wikipedia_URL'], escape=False) \
-        .format({ # Use a dictionary for specific formatters
-            'Topical_Authority_SERP_Count': "{:,.0f}", # Format as integer with commas
+        .format({
+            'Topical_Authority_SERP_Count': "{:,.0f}",
             'Topical_Authority_Ratio': "{:.2f}%",
             'Scholar_Citations_Count': "{:,.0f}",
             'LinkedIn_Followers': "{:,.0f}",
@@ -547,11 +603,10 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
         mime="text/csv",
         help="Download the analysis results as a CSV file."
     )
-    progress_bar.empty() # Clear the processing bar
-    status_text.empty() # Clear the processing status message
-    st_spinner_placeholder.empty() # Clear the spinner
+    progress_bar.empty()
+    status_text.empty()
+    st_spinner_placeholder.empty()
     st.success("Bulk analysis complete!")
 
-# If neither analysis has been triggered yet, show an initial message
 else:
     st.info("Use the sidebar to input author details for individual analysis, or upload a CSV for bulk processing. Results will appear here.")
