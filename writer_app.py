@@ -49,7 +49,7 @@ EXCLUDED_GENERIC_DOMAINS_REGEX = [
     r"socialistworker\.co\.uk", r"newstatesman\.com", r"spectator\.co\.uk", # Political/commentary (not primary news)
     r"echo-news\.co\.uk", r"times-series\.co\.uk", r"thenational\.scot", r"oxfordmail\.co\.uk", # Regional/specific news
     r"moneyweek\.com", r"politeia\.co\.uk", r"theweek\.com", # Finance/political
-    r"innertemplelibrary\.com", r"san\.com", r"unherd\.com", "padstudio.co.uk", # Other commentary/blogs
+    r"innertemplelibrary\.com", r"san\.com", r"unherd\.com", r"padstudio\.co\.uk", # Other commentary/blogs
     r"deepsouthmedia\.co\.uk", r"dorsetchamber\.co\.uk", r"mattrossphysiotherapy\.co\.uk", # Local/specific business
     r"company-information\.service\.gov\.uk", r"infogo\.gov\.on\.ca" # Government/company info
 ]
@@ -90,40 +90,40 @@ def check_knowledge_panel(author: str) -> tuple[bool, str]:
     payload = {"keyword": search_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"}
     data = make_dataforseo_call(payload)
 
-    # st.write(f"DEBUG KP Query: {search_query}") # Debugging
-    # if data: st.json(data) # Debugging raw DataForSEO response
+    # For debugging: uncomment these lines to see the raw JSON in Streamlit
+    # st.write(f"DEBUG KP Query: {search_query}")
+    # if data: st.json(data)
 
     if data and "tasks" in data and data["tasks"]:
         for task in data["tasks"]:
             if "result" in task and task["result"]:
-                for result_item in task["result"]: # Iterate through top-level items in 'result'
-                    # Check if the current result_item itself is the knowledge_graph block
-                    if result_item.get("type") == "knowledge_graph":
-                        kp_title = result_item.get("title", "").lower()
-                        # Be slightly flexible with title match or check description/subtitle
-                        if kp_title == author.lower() or author.lower() in result_item.get("description", "").lower():
+                # The knowledge_graph can appear as a top-level block OR within a primary organic block's items
+                for result_block in task["result"]:
+                    # Case 1: Knowledge Graph is a direct top-level block (like task[1] in your JSON)
+                    if result_block.get("type") == "knowledge_graph":
+                        kp_title = result_block.get("title", "").lower()
+                        # Check if the title matches or the author is in the description/subtitle
+                        if kp_title == author.lower() or author.lower() in result_block.get("description", "").lower() or author.lower() in result_block.get("subtitle", "").lower():
                             return True, "Knowledge Panel found"
-                        # Sometimes the KP is on the right, but its full title is not exactly the author name,
-                        # but one of its sub-items will clearly identify the author.
-                        if "items" in result_item:
-                            for sub_item in result_item["items"]:
+                        # Also check sub-items within this direct knowledge_graph block if they identify the author
+                        if "items" in result_block:
+                            for sub_item in result_block["items"]:
                                 if sub_item.get("type") in ["knowledge_graph_description_item", "knowledge_graph_row_item"]:
                                     if author.lower() in sub_item.get("text", "").lower() or author.lower() in sub_item.get("title", "").lower():
-                                        return True, "Knowledge Panel found (via sub-item content)"
-                
-                # Fallback: if the KP is not a direct top-level block, but buried as an item in another type (less common but possible)
-                for result_block in task["result"]:
-                    if "items" in result_block:
+                                        return True, "Knowledge Panel found (via sub-item content in direct KP block)"
+                    
+                    # Case 2: Knowledge Graph is an item *within* an 'items' list of another block (e.g., an 'organic' block)
+                    if "items" in result_block: # This checks items nested under current result_block
                         for item_nested in result_block["items"]:
                             if item_nested.get("type") == "knowledge_graph":
                                 kp_title = item_nested.get("title", "").lower()
                                 if kp_title == author.lower() or author.lower() in item_nested.get("description", "").lower():
-                                    return True, "Knowledge Panel found (nested)"
+                                    return True, "Knowledge Panel found (nested within items)"
                                 if "items" in item_nested: # Check sub-items if nested KP has them
                                     for sub_item_nested in item_nested["items"]:
                                         if sub_item_nested.get("type") in ["knowledge_graph_description_item", "knowledge_graph_row_item"]:
                                             if author.lower() in sub_item_nested.get("text", "").lower() or author.lower() in sub_item_nested.get("title", "").lower():
-                                                return True, "Knowledge Panel found (nested via sub-item)"
+                                                return True, "Knowledge Panel found (nested via sub-item content)"
         return False, "No Knowledge Panel found in SERP results"
     return False, data.get("error", "No data or task in DataForSEO response.")
 
@@ -156,17 +156,18 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
     author_only_query = f'"{author}"'
 
     payloads = []
-    author_topic_query = ""
-    topic_query = ""
+    author_topic_query_str = ""
+    topic_query_str = ""
 
-    if topic: # Only add topic-related queries if a topic is provided
-        author_topic_query = f'"{author}" AND "{topic}"'
-        topic_query = f'"{topic}"'
-        payloads.append({"keyword": author_topic_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"})
-        payloads.append({"keyword": topic_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"})
-    
+    # Always ensure author_only_query is in the batch
     payloads.append({"keyword": author_only_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"})
 
+    if topic: # Only add topic-related queries if a topic is provided
+        author_topic_query_str = f'"{author}" AND "{topic}"'
+        topic_query_str = f'"{topic}"'
+        payloads.append({"keyword": author_topic_query_str, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"})
+        payloads.append({"keyword": topic_query_str, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"})
+    
     # Deduplicate payloads by keyword, ensuring all needed queries are sent
     seen_keywords = set()
     unique_payloads = []
@@ -177,7 +178,7 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
     
     batch_data_response = make_dataforseo_call(unique_payloads)
 
-    # Initialize task data holders
+    # Initialize task data holders based on the original requested keywords
     author_topic_data_task = {}
     topic_only_data_task = {}
     author_only_data_task = {} # This will hold data for `"Allison Pearson"` search
@@ -185,9 +186,9 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
     if batch_data_response and "tasks" in batch_data_response:
         for task in batch_data_response["tasks"]:
             keyword_in_task = task.get("keyword") 
-            if keyword_in_task == author_topic_query and "result" in task:
+            if keyword_in_task == author_topic_query_str and "result" in task:
                 author_topic_data_task = task
-            elif keyword_in_task == topic_query and "result" in task:
+            elif keyword_in_task == topic_query_str and "result" in task:
                 topic_only_data_task = task
             elif keyword_in_task == author_only_query and "result" in task:
                 author_only_data_task = task
@@ -201,17 +202,16 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
     topical_associated_domains = set()
     perspectives_domains = set() # Always collected
 
-    # --- Extract Perspectives Domains (from author_only_data_task and author_topic_data_task if available) ---
-    # Check both data sources where perspectives might appear
-    for data_source_task in [author_only_data_task, author_topic_data_task]:
-        if "result" in data_source_task and data_source_task["result"]:
-            for result_block in data_source_task["result"]: # Iterate through top-level result blocks
-                if result_block.get("type") == "perspectives" and result_block.get("items"):
-                    for perspective_item in result_block["items"]:
-                        if perspective_item.get("domain"):
-                            perspectives_domains.add(perspective_item["domain"])
+    # --- Extract Perspectives Domains (from author_only_data_task, it's primary for this) ---
+    # According to JSON: "perspectives" is a direct type block within task["result"]
+    if "result" in author_only_data_task and author_only_data_task["result"]:
+        for result_block in author_only_data_task["result"]:
+            if result_block.get("type") == "perspectives" and result_block.get("items"):
+                for perspective_item in result_block["items"]:
+                    if perspective_item.get("domain"):
+                        perspectives_domains.add(perspective_item["domain"])
     
-    # If no topic is provided for topical authority calculation, return early for those fields
+    # If no topic is provided, fill topical fields with N/A or empty, but return perspectives
     if not topic:
         return 0, 0.0, "N/A", [], [], sorted(list(perspectives_domains))
 
@@ -292,8 +292,8 @@ def get_author_associated_brands(author: str) -> tuple[list[str], list[str]]:
     if data and "tasks" in data and data["tasks"]:
         for task in data["tasks"]:
             if "result" in task and task["result"]:
-                for result_block in task["result"]: # Changed to result_block for clarity
-                    if "items" in result_block:
+                for result_block in task["result"]: 
+                    if "items" in result_block: # Check items within this result_block
                         for item in result_block["items"]:
                             if item.get("type") == "organic" and "domain" in item:
                                 domain = item["domain"]
@@ -674,7 +674,6 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
     styled_df = results_df.style \
         .map(highlight_score_color_cell_bulk, subset=['Quality_Score']) \
         .applymap(highlight_tick_cross_bg_cell_bulk, subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page', 'Has_Perspectives']) \
-        .format(make_clickable_wikipedia_bulk, subset=['Wikipedia_URL'], escape=False) \
         .format({
             'Topical_Authority_SERP_Count': "{:,.0f}",
             'Topical_Authority_Ratio': "{:.2f}%",
@@ -684,7 +683,8 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
             'Instagram_Followers': "{:,.0f}",
             'TikTok_Followers': "{:,.0f}",
             'Facebook_Followers': "{:,.0f}"
-        })
+        }) \
+        .format(make_clickable_wikipedia_bulk, subset=['Wikipedia_URL'], escape=False) # Apply after other formatting if needed
 
     st.dataframe(styled_df, use_container_width=True, height=500) 
 
