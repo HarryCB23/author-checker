@@ -17,26 +17,39 @@ except KeyError as e:
 DATAFORSEO_ORGANIC_URL = "https://api.dataforseo.com/v3/serp/google/organic/live/regular"
 
 UK_PUBLISHER_DOMAINS = [
-    "thetimes.com", "theguardian.com", "bbc.co.uk", "express.co.uk", 
-    "standard.co.uk", "dailymail.co.uk", "independent.co.uk", "thesun.co.uk",
-    "mirror.co.uk", "metro.co.uk", "gbnews.com", "telegraph.co.uk"
+    "thetimes.com",
+    "theguardian.com",
+    "bbc.co.uk",
+    "express.co.uk",
+    "standard.co.uk",
+    "dailymail.co.uk",
+    "independent.co.uk",
+    "thesun.co.uk",
+    "mirror.co.uk",
+    "metro.co.uk",
+    "gbnews.com",
+    "telegraph.co.uk" # Ensure Telegraph itself is considered a major publisher
 ]
 EXCLUDED_GENERIC_DOMAINS_REGEX = [
     r"wikipedia\.org", r"linkedin\.com", r"twitter\.com", r"x\.com",
     r"facebook\.com", r"instagram\.com", r"youtube\.com", r"pinterest\.com",
     r"tiktok\.com", r"medium\.com", r"quora\.com", r"reddit\.com",
-    r"threads\.net", r"amazon\.", r"audible\.com", r"audible\.com\.au",
-    r"goodreads\.com", r"imdb\.com", r"substack\.com", r"acast\.com",
-    r"apple\.com", r"spotify\.com", r"yahoo\.com", r"wordpress\.com",
-    r"msn\.com", r"bylinetimes\.com", r"pressreader\.com", r"champions-speakers\.co\.uk",
-    r"thriftbooks\.com", r"abebooks\.com", r"researchgate\.net", r"prowly\.com",
-    r"shutterstock\.com", r"brainyquote\.com", r"fantasticfiction\.com", r"addall\.com",
-    r"waterstones\.com", r"penguinrandomhouse\.com", r"penguin\.co\.uk", r"barr\.com",
-    r"american\.edu", r"ashenden\.org", r"arrse\.co\.uk", r"mumsnet\.com",
-    r"ebay\.com", r"pangobooks\.com", r"gettyimages\.co\.uk", r"socialistworker\.co\.uk",
-    r"newstatesman\.com", r"spectator\.co\.uk", r"echo-news\.co\.uk", r"times-series\.co\.uk",
-    r"thenational\.scot", r"oxfordmail\.co\.uk", r"moneyweek\.com", r"politeia\.co\.uk",
-    r"theweek\.com", r"innertemplelibrary\.com", r"san\.com", r"unherd\.com", r"padstudio\.co\.uk",
+    r"threads\.net", r"amazon\.",
+    r"audible\.com", r"audible\.com\.au",
+    r"goodreads\.com", r"imdb\.com", r"substack\.com",
+    r"acast\.com", r"apple\.com", r"spotify\.com", r"yahoo\.com",
+    r"wordpress\.com", r"msn\.com", r"bylinetimes\.com", r"pressreader\.com",
+    r"champions-speakers\.co\.uk", r"thriftbooks\.com", r"abebooks\.com",
+    r"researchgate\.net", r"prowly\.com", r"shutterstock\.com",
+    r"brainyquote\.com", r"fantasticfiction\.com", r"addall\.com",
+    r"waterstones\.com", r"penguinrandomhouse\.com", r"penguin\.co\.uk",
+    r"barr\.com", r"american\.edu", r"ashenden\.org",
+    r"arrse\.co\.uk", r"mumsnet\.com",
+    r"ebay\.com", r"pangobooks\.com", r"gettyimages\.co\.uk",
+    r"socialistworker\.co\.uk", r"newstatesman\.com", r"spectator\.co\.uk",
+    r"echo-news\.co\.uk", r"times-series\.co\.uk", r"thenational\.scot", r"oxfordmail\.co\.uk",
+    r"moneyweek\.com", r"politeia\.co\.uk", r"theweek\.com",
+    r"innertemplelibrary\.com", r"san\.com", r"unherd\.com", r"padstudio\.co\.uk",
     r"deepsouthmedia\.co\.uk", r"dorsetchamber\.co\.uk", r"mattrossphysiotherapy\.co\.uk",
     r"company-information\.service\.gov\.uk", r"infogo\.gov\.on\.ca"
 ]
@@ -59,10 +72,12 @@ def make_dataforseo_call(payload: dict) -> dict:
         response.raise_for_status()
         response_json = response.json()
         
-        # --- DEBUGGING make_dataforseo_call: Uncomment to see raw JSON for each API call ---
-        # st.markdown(f"--- 🐛 DEBUG: Raw DataForSEO Response for Keyword: `{payload[0].get('keyword', 'N/A') if payload else 'N/A'}` ---")
-        # st.json(response_json)
-        # st.markdown("--- 🐛 END DEBUG: Raw DataForSEO Response ---")
+        # --- START DEBUGGING make_dataforseo_call: THIS WILL PRINT RAW JSON ---
+        # THIS SECTION WILL FLOOD YOUR APP WITH JSON. REMOVE AFTER DEBUGGING.
+        st.markdown(f"--- 🐛 DEBUG: RAW DataForSEO Response for Keyword: `{payload[0].get('keyword', 'N/A') if payload else 'N/A'}` ---")
+        st.json(response_json) # Display the full JSON response
+        st.markdown("--- 🐛 END RAW DataForSEO Response ---")
+        # --- END DEBUGGING make_dataforseo_call ---
 
         return response_json
     except requests.exceptions.HTTPError as http_err:
@@ -85,44 +100,52 @@ def check_knowledge_panel_from_data(author: str, data_for_author_only: dict) -> 
     Checks for a Google Knowledge Panel within pre-fetched DataForSEO response.
     Expects data_for_author_only to be the full response from a search for only the author's name.
     """
-    # st.markdown(f"--- 🐛 DEBUG: `check_knowledge_panel_from_data` for author: `{author}` ---")
+    st.markdown(f"--- 🐛 DEBUG: `check_knowledge_panel_from_data` for author: `{author}` ---")
     
     if data_for_author_only and "tasks" in data_for_author_only and data_for_author_only["tasks"]:
         for task_idx, task in enumerate(data_for_author_only["tasks"]):
-            # st.write(f"  🐛 DEBUG KP: Processing task index {task_idx}, type: {task.get('type')}, keyword: {task.get('keyword')}")
+            st.write(f"  🐛 DEBUG KP: Processing task index {task_idx}, type: `{task.get('type')}`, keyword: `{task.get('keyword')}`")
             
             # Scenario A: The task itself is a knowledge_graph type (as seen in your debug JSON as Task 1)
-            if task.get("type") == "knowledge_graph" and "result" in task and task["result"]:
-                kp_block_data = task["result"][0] # Usually the first item contains the main KP data
-                kp_title = kp_block_data.get("title", "").lower()
-                # st.write(f"    🐛 DEBUG KP: Found direct KP task. Title: '{kp_title}', Expected: '{author.lower()}'")
-                if kp_title == author.lower() or author.lower() in kp_block_data.get("description", "").lower():
-                    return True, "Knowledge Panel found (direct task result type)"
-                if "items" in kp_block_data: # Also check sub-items within this direct KP block
-                    for sub_item in kp_block_data["items"]:
-                        if sub_item.get("type") in ["knowledge_graph_description_item", "knowledge_graph_row_item"]:
-                            if author.lower() in sub_item.get("text", "").lower() or author.lower() in sub_item.get("title", "").lower():
-                                return True, "Knowledge Panel found (direct task result type, via sub-item)"
+            if task.get("type") == "knowledge_graph":
+                if "result" in task and task["result"] and task["result"][0]:
+                    kp_block_data = task["result"][0] # Usually the first item contains the main KP data
+                    kp_title = kp_block_data.get("title", "").lower()
+                    st.write(f"    🐛 DEBUG KP: Found direct KP task (type: knowledge_graph). Title: '{kp_title}', Expected: '{author.lower()}'")
+                    if kp_title == author.lower() or author.lower() in kp_block_data.get("description", "").lower():
+                        st.write("      🐛 DEBUG KP: Match found in direct KP task title/description.")
+                        return True, "Knowledge Panel found (direct task result type)"
+                    if "items" in kp_block_data: # Check sub-items within this direct KP block
+                        for sub_item_idx, sub_item in enumerate(kp_block_data["items"]):
+                            st.write(f"        🐛 DEBUG KP: Checking direct KP sub-item {sub_item_idx}, type: {sub_item.get('type')}")
+                            if sub_item.get("type") in ["knowledge_graph_description_item", "knowledge_graph_row_item"]:
+                                if author.lower() in sub_item.get("text", "").lower() or author.lower() in sub_item.get("title", "").lower():
+                                    st.write("          🐛 DEBUG KP: Match found in direct KP sub-item text/title.")
+                                    return True, "Knowledge Panel found (direct task result type, via sub-item)"
             
             # Scenario B: KP is nested within 'items' of a result_block (e.g., the primary 'organic' result block)
             if "result" in task and task["result"]:
                 for result_block_idx, result_block in enumerate(task["result"]):
-                    # st.write(f"    🐛 DEBUG KP: Processing result_block {result_block_idx}, type: {result_block.get('type')}")
+                    st.write(f"    🐛 DEBUG KP: Processing result_block {result_block_idx}, type: `{result_block.get('type')}`")
                     if result_block.get("items"):
                         for item_in_block_items_idx, item_in_block_items in enumerate(result_block["items"]):
-                            # st.write(f"      🐛 DEBUG KP: Processing item_in_block_items {item_in_block_items_idx}, type: {item_in_block_items.get('type')}")
+                            st.write(f"      🐛 DEBUG KP: Processing item_in_block_items {item_in_block_items_idx}, type: `{item_in_block_items.get('type')}`")
                             if item_in_block_items.get("type") == "knowledge_graph":
                                 kp_title = item_in_block_items.get("title", "").lower()
+                                st.write(f"        🐛 DEBUG KP: Found nested KP. Title: '{kp_title}', Expected: '{author.lower()}'")
                                 if kp_title == author.lower() or author.lower() in item_in_block_items.get("description", "").lower():
+                                    st.write("          🐛 DEBUG KP: Match found in nested KP item title/description.")
                                     return True, "Knowledge Panel found (nested in result_block items)"
                                 if "items" in item_in_block_items:
-                                    for sub_item_nested in item_in_block_items["items"]:
+                                    for sub_item_nested_idx, sub_item_nested in enumerate(item_in_block_items["items"]):
+                                        st.write(f"          🐛 DEBUG KP: Checking nested KP sub-item {sub_item_nested_idx}, type: {sub_item_nested.get('type')}")
                                         if sub_item_nested.get("type") in ["knowledge_graph_description_item", "knowledge_graph_row_item"]:
                                             if author.lower() in sub_item_nested.get("text", "").lower() or author.lower() in sub_item_nested.get("title", "").lower():
+                                                st.write("            🐛 DEBUG KP: Match found in nested KP sub-item text/title.")
                                                 return True, "Knowledge Panel found (nested in result_block items, via sub-item)"
-        # st.write("🐛 DEBUG KP: No Knowledge Panel found after exhaustive search.")
+        st.write("🐛 DEBUG KP: No Knowledge Panel found after exhaustive search in all tasks.")
         return False, "No Knowledge Panel found in SERP results"
-    # st.write(f"🐛 DEBUG KP: Data for author search error or empty: {data_for_author_only.get('error', 'N/A')}")
+    st.write(f"🐛 DEBUG KP: Data for author search error or empty: {data_for_author_only.get('error', 'N/A')}")
     return False, data_for_author_only.get("error", "No data or task in DataForSEO response.")
 
 
@@ -166,6 +189,7 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
         author_topic_query_str = f'"{author}" AND "{topic}"'
         topic_query_str = f'"{topic}"'
         
+        # Add to payloads only if they are not the same as author_only_query
         if author_topic_query_str != author_only_query:
             payloads.append({"keyword": author_topic_query_str, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"})
         if topic_query_str != author_only_query and topic_query_str != author_topic_query_str:
@@ -187,9 +211,9 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
     author_only_data_task = {} # This will hold data for "Allison Pearson" search
 
     if batch_data_response and "tasks" in batch_data_response:
-        for task in batch_data_response["tasks"]:
+        for task_idx, task in enumerate(batch_data_response["tasks"]):
             keyword_in_task = task.get("keyword") 
-            # st.write(f"  🐛 DEBUG Topical Task Loop: Task Keyword: {keyword_in_task}") # Debug
+            # st.write(f"  🐛 DEBUG Topical Task Loop: Task Index {task_idx}, Keyword: `{keyword_in_task}`")
             if keyword_in_task == author_topic_query_str and "result" in task:
                 author_topic_data_task = task
             elif keyword_in_task == topic_query_str and "result" in task:
@@ -208,55 +232,62 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
 
     # --- Extract Perspectives Domains from the author_only_data_task ---
     # Based on JSON: "perspectives" is a block nested within 'items' of a result_block (often the main 'organic' block)
-    # st.write(f"🐛 DEBUG Topical: Extracting Perspectives from author_only_data_task (Keyword: {author_only_data_task.get('keyword')})")
+    st.markdown(f"--- 🐛 DEBUG: Extracting Perspectives from `author_only_data_task` (Keyword: `{author_only_data_task.get('keyword', 'N/A')}`) ---")
     if "result" in author_only_data_task and author_only_data_task["result"]:
         for result_block_idx, result_block in enumerate(author_only_data_task["result"]):
-            # st.write(f"  🐛 DEBUG Topical: Perspectives: Result_block {result_block_idx}, Type: {result_block.get('type')}")
+            st.write(f"  🐛 DEBUG Topical: Perspectives: Result_block {result_block_idx}, Type: `{result_block.get('type')}`")
             if "items" in result_block: # Most SERP features are nested here
                 for item_in_block_items_idx, item_in_block_items in enumerate(result_block["items"]):
-                    # st.write(f"    🐛 DEBUG Topical: Perspectives: Item {item_in_block_items_idx}, Type: {item_in_block_items.get('type')}")
+                    st.write(f"    🐛 DEBUG Topical: Perspectives: Item {item_in_block_items_idx}, Type: `{item_in_block_items.get('type')}`")
                     if item_in_block_items.get("type") == "perspectives" and item_in_block_items.get("items"):
-                        # st.write(f"      🐛 DEBUG Topical: Perspectives: Found 'perspectives' block at item {item_in_block_items_idx}!")
-                        for perspective_item in item_in_block_items["items"]:
+                        st.write(f"      🐛 DEBUG Topical: Perspectives: Found 'perspectives' block at item {item_in_block_items_idx}!")
+                        for perspective_item_idx, perspective_item in enumerate(item_in_block_items["items"]):
                             if perspective_item.get("domain"):
                                 perspectives_domains.add(perspective_item["domain"])
-                                # st.write(f"        🐛 DEBUG Topical: Perspectives: Added domain: {perspective_item['domain']}")
+                                st.write(f"        🐛 DEBUG Topical: Perspectives: Added domain: `{perspective_item['domain']}`")
                         break # Found perspectives, no need to check other items in this block
-    # st.write(f"🐛 DEBUG Topical: Final perspectives_domains: {perspectives_domains}")
+    st.write(f"🐛 DEBUG Topical: Final perspectives_domains: {perspectives_domains}")
+    st.markdown("--- 🐛 END DEBUG: Perspectives Extraction ---")
     
     # If no topic is provided for topical authority calculation, return early for those fields
     if not topic:
-        # Also return the author_only_data_task itself for external KP check
         return 0, 0.0, "N/A", [], [], sorted(list(perspectives_domains)), author_only_data_task
 
 
     # --- Extract Topical Authority Results Count ---
-    # st.write(f"🐛 DEBUG Topical: Extracting Topical Authority from author_topic_data_task (Keyword: {author_topic_data_task.get('keyword')})")
+    st.markdown(f"--- 🐛 DEBUG: Extracting Topical Authority from `author_topic_data_task` (Keyword: `{author_topic_data_task.get('keyword', 'N/A')}`) ---")
     if "result" in author_topic_data_task and author_topic_data_task["result"]:
         for result_item in author_topic_data_task["result"]:
             if result_item.get("type") == "organic" and result_item.get("serp"):
                 author_topic_results_count = result_item["serp"].get("results_count", 0)
+                st.write(f"  🐛 DEBUG Topical: Found author_topic_results_count: {author_topic_results_count}")
                 break
+    st.markdown("--- 🐛 END DEBUG: Topical Authority Count ---")
 
-    # st.write(f"🐛 DEBUG Topical: Extracting Total Topic Results from topic_only_data_task (Keyword: {topic_only_data_task.get('keyword')})")
+    st.markdown(f"--- 🐛 DEBUG: Extracting Total Topic Results from `topic_only_data_task` (Keyword: `{topic_only_data_task.get('keyword', 'N/A')}`) ---")
     if "result" in topic_only_data_task and topic_only_data_task["result"]:
         for result_item in topic_only_data_task["result"]:
             if result_item.get("type") == "organic" and result_item.get("serp"):
                 total_topic_results_count = result_item["serp"].get("results_count", 0)
+                st.write(f"  🐛 DEBUG Topical: Found total_topic_results_count: {total_topic_results_count}")
                 break
+    st.markdown("--- 🐛 END DEBUG: Total Topic Results ---")
 
     if total_topic_results_count > 0:
         topical_authority_ratio = (author_topic_results_count / total_topic_results_count) * 100
 
     # --- Extract AI Overview ---
-    # st.write(f"🐛 DEBUG Topical: Extracting AI Overview from author_topic_data_task (Keyword: {author_topic_data_task.get('keyword')})")
+    st.markdown(f"--- 🐛 DEBUG: Extracting AI Overview from `author_topic_data_task` (Keyword: `{author_topic_data_task.get('keyword', 'N/A')}`) ---")
     if "result" in author_topic_data_task and author_topic_data_task["result"]:
-        for result_item in author_topic_data_task["result"]:
+        for result_item_idx, result_item in enumerate(author_topic_data_task["result"]):
+            st.write(f"  🐛 DEBUG Topical: AI Overview: Processing result_item {result_item_idx}, type: `{result_item.get('type')}`")
             if result_item.get("type") == "ai_overview" and result_item.get("ai_overview"):
                 ai_overview_content = result_item["ai_overview"]
+                st.write("    🐛 DEBUG Topical: AI Overview: Found 'ai_overview' block!")
                 
                 if ai_overview_content.get("summary"): 
                     ai_overview_summary = ai_overview_content["summary"].strip()
+                    st.write(f"      🐛 DEBUG Topical: AI Overview: Found summary: `{ai_overview_summary[:100]}...`")
                 elif ai_overview_content.get("items"):
                     ai_overview_parts = []
                     for item_part in ai_overview_content["items"]:
@@ -264,31 +295,41 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
                             ai_overview_parts.append(item_part["text"])
                     if ai_overview_parts:
                         ai_overview_summary = " ".join(ai_overview_parts).strip()
+                        st.write(f"      🐛 DEBUG Topical: AI Overview: Found items text: `{ai_overview_summary[:100]}...`")
                 elif ai_overview_content.get("asynchronous_ai_overview"):
                     ai_overview_summary = "AI Overview present (content loading dynamically)." 
+                    st.write("      🐛 DEBUG Topical: AI Overview: Asynchronous detected.")
                 
                 if ai_overview_summary != "N/A" and len(ai_overview_summary) > 500:
                     ai_overview_summary = ai_overview_summary[:500] + "..."
                 break
+    st.write(f"🐛 DEBUG Topical: Final ai_overview_summary: {ai_overview_summary}")
+    st.markdown("--- 🐛 END DEBUG: AI Overview Extraction ---")
 
     # --- Extract Top Stories Mentions and Topical Associated Domains ---
-    # st.write(f"🐛 DEBUG Topical: Extracting Top Stories/Topical Brands from author_topic_data_task (Keyword: {author_topic_data_task.get('keyword')})")
+    st.markdown(f"--- 🐛 DEBUG: Extracting Top Stories/Topical Brands from `author_topic_data_task` (Keyword: `{author_topic_data_task.get('keyword', 'N/A')}`) ---")
     if "result" in author_topic_data_task and author_topic_data_task["result"]:
         for result_item in author_topic_data_task["result"]:
             if result_item.get("type") == "top_stories" and result_item.get("items"):
+                st.write("  🐛 DEBUG Topical: Found 'top_stories' block.")
                 for news_item in result_item["items"]:
                     if (author.lower() in news_item.get("title", "").lower() or 
                         author.lower() in news_item.get("description", "").lower()):
                         top_stories_mentions.append(news_item.get("domain"))
+                        st.write(f"    🐛 DEBUG Topical: Top Stories: Added mention from domain: `{news_item.get('domain')}`")
 
-            if "items" in result_item: # Check if 'items' array is in this result_item
+            if "items" in result_item:
                 for item in result_item["items"]:
                     if item.get("type") == "organic" and "domain" in item:
                         domain = item["domain"]
                         if (author.lower() in item.get("title", "").lower() or 
-                            author.lower() in item.get("description", "").lower()) and \
-                           not any(re.search(pattern, domain) for pattern in EXCLUDED_GENERIC_DOMAINS_REGEX):
-                            topical_associated_domains.add(domain)
+                            author.lower() in item.get("description", "").lower()):
+                            if not any(re.search(pattern, domain) for pattern in EXCLUDED_GENERIC_DOMAINS_REGEX):
+                                topical_associated_domains.add(domain)
+                                st.write(f"    🐛 DEBUG Topical: Topical Brand: Added domain: `{domain}`")
+    st.write(f"🐛 DEBUG Topical: Final top_stories_mentions: {top_stories_mentions}")
+    st.write(f"🐛 DEBUG Topical: Final topical_associated_domains: {topical_associated_domains}")
+    st.markdown("--- 🐛 END DEBUG: Top Stories/Topical Brands ---")
                             
     return (author_topic_results_count, topical_authority_ratio, ai_overview_summary,
             sorted(list(set(top_stories_mentions))), sorted(list(topical_associated_domains)), sorted(list(perspectives_domains)),
@@ -303,7 +344,7 @@ def get_author_associated_brands(author: str) -> tuple[list[str], list[str]]:
     """
     search_query = f'"{author}"' # General search for author's overall brand presence
     payload = {"keyword": search_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"}
-    data = make_dataforseo_call(payload)
+    data = make_dataforseo_call(payload) # This call will also print its raw JSON
 
     all_associated_domains = set()
     matched_uk_publishers = set()
@@ -328,7 +369,7 @@ def check_google_scholar_citations(author: str) -> int:
     """Counts search results for author citations on Google Scholar."""
     search_query = f'"{author}" "cited by" site:scholar.google.com'
     payload = {"keyword": search_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"}
-    data = make_dataforseo_call(payload)
+    data = make_dataforseo_call(payload) # This call will also print its raw JSON
     if data and "tasks" in data and data["tasks"]:
         for task in data["tasks"]:
             if "result" in task and task["result"]:
@@ -431,7 +472,7 @@ with st.sidebar:
                         top_stories_mentions, topical_associated_domains, perspectives_domains, \
                         author_only_full_data = analyze_topical_serp(single_author_name, single_keyword_topic)
 
-                    # Now, pass the pre-fetched data to check_knowledge_panel
+                    # Pass the pre-fetched data to check_knowledge_panel_from_data
                     kp_exists, kp_details = check_knowledge_panel_from_data(single_author_name, author_only_full_data)
                     
                     wiki_exists, wiki_details, wiki_url = check_wikipedia(single_author_name) # Wikipedia still separate
@@ -576,7 +617,7 @@ if st.session_state['triggered_single_analysis'] and st.session_state['single_au
 elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data_to_process'] is not None:
     st.subheader("Bulk Author Analysis Results")
     
-    bulk_data = st.session_state['bulk_data_to_process'] # Use session state for bulk data
+    bulk_data = st.session_state['bulk_data_to_process']
     results = []
     total_authors = len(bulk_data)
     
@@ -605,7 +646,7 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
                     top_stories_mentions, topical_associated_domains, perspectives_domains, \
                     author_only_full_data = analyze_topical_serp(author, keyword)
 
-                # Now, pass the pre-fetched data to check_knowledge_panel
+                # Pass the pre-fetched data to check_knowledge_panel
                 kp_exists, kp_details = check_knowledge_panel_from_data(author, author_only_full_data)
                 
                 wiki_exists, wiki_details, wiki_url = check_wikipedia(author)
@@ -614,7 +655,7 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
                 scholar_citations_count = check_google_scholar_citations(author)
                 
                 has_perspectives = len(perspectives_domains) > 0
-                
+
                 quality_score = calculate_quality_score(
                     kp_exists, wiki_exists, topical_authority_ratio,
                     scholar_citations_count, linkedin_followers, x_followers,
