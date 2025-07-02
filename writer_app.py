@@ -3,6 +3,7 @@ import requests
 import time
 import pandas as pd
 import re
+import json
 
 st.set_page_config(layout="wide", page_title="Author Quality Evaluator")
 
@@ -45,84 +46,137 @@ EXCLUDED_GENERIC_DOMAINS_REGEX = [
     r"company-information\.service\.gov\.uk", r"infogo\.gov\.on\.ca"
 ]
 
+DEBUG = True
+
+def debug_section(title, obj):
+    if DEBUG:
+        st.markdown(f"**DEBUG: {title}**")
+        st.json(obj)
+
 # --- Utility: Robust parsing for DataforSEO items ---
 def extract_items_for_keyword(dataforseo_response, keyword: str):
+    # Handles both array (list) and old dict ("tasks") root structures
+    st.markdown("**DEBUG: extract_items_for_keyword call**")
+    st.write(f"Type of input: {type(dataforseo_response)} | Searching for keyword: {keyword}")
+
+    # Accept both quoted/unquoted
+    def kw_match(kw1, kw2):
+        return kw1.replace('"','').strip().lower() == kw2.replace('"','').strip().lower()
+
     if isinstance(dataforseo_response, list):
+        st.write(f"DEBUG: Root is a LIST with {len(dataforseo_response)} items.")
         for result in dataforseo_response:
             kw = str(result.get("keyword", "")).strip()
-            if kw == keyword or kw == f'"{keyword}"':
+            st.write(f"DEBUG: Checking kw={kw} vs keyword={keyword}")
+            if kw_match(kw, keyword):
+                st.write("DEBUG: MATCHED keyword in DataforSEO LIST root")
+                debug_section("items (LIST root match)", result.get("items", []))
                 return result.get("items", [])
+        # fallback
         if dataforseo_response:
+            st.warning("DEBUG: No keyword match in LIST root. Returning first element's items.")
+            debug_section("items (LIST root fallback)", dataforseo_response[0].get("items", []))
             return dataforseo_response[0].get("items", [])
+        st.error("DEBUG: DataforSEO LIST root is empty.")
         return []
-    try:
+    elif isinstance(dataforseo_response, dict):
+        st.write("DEBUG: Root is a DICT.")
         tasks = dataforseo_response.get("tasks", [])
+        st.write(f"DEBUG: Found {len(tasks)} tasks.")
         for task in tasks:
             task_kw = str(task.get("keyword", "")).strip()
-            if task_kw == keyword or task_kw == f'"{keyword}"':
+            st.write(f"DEBUG: Checking task_kw={task_kw} vs keyword={keyword}")
+            if kw_match(task_kw, keyword):
                 result = task.get("result", [])
                 if result and isinstance(result, list):
                     result0 = result[0]
-                    items = result0.get("items", [])
-                    if isinstance(items, list):
-                        return items
+                    debug_section("items (DICT root match)", result0.get("items", []))
+                    return result0.get("items", [])
+        # fallback: just return items from first task/result if keyword match fails
         if tasks:
+            st.warning("DEBUG: No keyword match in DICT root. Returning first task/result's items.")
             result = tasks[0].get("result", [])
             if result and isinstance(result, list):
-                items = result[0].get("items", [])
-                if isinstance(items, list):
-                    return items
+                debug_section("items (DICT root fallback)", result[0].get("items", []))
+                return result[0].get("items", [])
+        st.error("DEBUG: No tasks in DICT root.")
         return []
-    except Exception:
+    else:
+        st.error("DEBUG: DataforSEO response is neither list nor dict.")
         return []
 
 def extract_se_results_count(dataforseo_response, keyword: str):
+    st.markdown("**DEBUG: extract_se_results_count call**")
+    st.write(f"Type of input: {type(dataforseo_response)} | Searching for keyword: {keyword}")
+    def kw_match(kw1, kw2):
+        return kw1.replace('"','').strip().lower() == kw2.replace('"','').strip().lower()
     if isinstance(dataforseo_response, list):
         for result in dataforseo_response:
             kw = str(result.get("keyword", "")).strip()
-            if kw == keyword or kw == f'"{keyword}"':
-                return int(result.get("se_results_count", 0))
+            if kw_match(kw, keyword):
+                val = int(result.get("se_results_count", 0))
+                st.write(f"DEBUG: Found SERP count in LIST root: {val}")
+                return val
         if dataforseo_response:
-            return int(dataforseo_response[0].get("se_results_count", 0))
+            val = int(dataforseo_response[0].get("se_results_count", 0))
+            st.warning("DEBUG: No keyword match in LIST root for SERP count. Returning first element's count.")
+            return val
+        st.error("DEBUG: DataforSEO LIST root is empty for SERP count.")
         return 0
-    try:
+    elif isinstance(dataforseo_response, dict):
         tasks = dataforseo_response.get("tasks", [])
         for task in tasks:
             task_kw = str(task.get("keyword", "")).strip()
-            if task_kw == keyword or task_kw == f'"{keyword}"':
+            if kw_match(task_kw, keyword):
                 result = task.get("result", [])
                 if result and isinstance(result, list):
-                    result0 = result[0]
-                    return int(result0.get("se_results_count", 0))
+                    val = int(result[0].get("se_results_count", 0))
+                    st.write(f"DEBUG: Found SERP count in DICT root: {val}")
+                    return val
         if tasks:
-            result = tasks[0].get("result", [])
-            if result and isinstance(result, list):
-                result0 = result[0]
-                return int(result0.get("se_results_count", 0))
+            val = int(tasks[0].get("result", [{}])[0].get("se_results_count", 0))
+            st.warning("DEBUG: No keyword match in DICT root for SERP count. Returning first task/result's count.")
+            return val
+        st.error("DEBUG: No tasks in DICT root for SERP count.")
         return 0
-    except Exception:
+    else:
+        st.error("DEBUG: DataforSEO response is neither list nor dict (SERP count).")
         return 0
 
 def extract_perspectives_domains(items: list) -> set:
+    st.markdown("**DEBUG: extract_perspectives_domains**")
+    st.write(f"items: {len(items)}")
     domains = set()
-    for item in items:
+    for idx, item in enumerate(items):
+        st.write(f"Item {idx} type: {item.get('type')}")
         if item.get("type") == "perspectives":
+            st.write(f"Item {idx} is a perspectives block.")
             for perspective_item in item.get("items", []):
+                st.write(f"Domain: {perspective_item.get('domain')}")
                 if perspective_item.get("domain"):
                     domains.add(perspective_item["domain"])
+    st.write(f"Perspectives domains found: {domains}")
     return domains
 
 def extract_knowledge_panel(items, entity_name: str):
-    for item in items:
+    st.markdown("**DEBUG: extract_knowledge_panel**")
+    st.write(f"Looking for KP with entity_name: '{entity_name}' in {len(items)} items")
+    for idx, item in enumerate(items):
+        st.write(f"Item {idx}: type={item.get('type')} | title={item.get('title')}")
         if item.get("type") == "knowledge_graph":
             kp_title = item.get("title", "").lower()
+            st.write(f"Item {idx} is a knowledge_graph. Title: {kp_title}")
             if kp_title == entity_name.lower() or entity_name.lower() in kp_title:
+                st.success(f"Knowledge Panel found by title match: {kp_title}")
                 return True, "Knowledge Panel found"
             if entity_name.lower() in item.get("description", "").lower():
+                st.success(f"Knowledge Panel found by description match.")
                 return True, "Knowledge Panel found (by description)"
+    st.warning("No Knowledge Panel found.")
     return False, "No Knowledge Panel found"
 
 def extract_ai_overview(items: list) -> str:
+    st.markdown("**DEBUG: extract_ai_overview**")
     for item in items:
         if item.get("type") == "ai_overview" and item.get("ai_overview"):
             ai_overview_content = item["ai_overview"]
@@ -138,6 +192,7 @@ def extract_ai_overview(items: list) -> str:
     return "N/A"
 
 def extract_top_stories_mentions(items: list, author: str) -> list:
+    st.markdown("**DEBUG: extract_top_stories_mentions**")
     results = []
     for item in items:
         if item.get("type") == "top_stories" and item.get("items"):
@@ -145,9 +200,11 @@ def extract_top_stories_mentions(items: list, author: str) -> list:
                 if (author.lower() in news_item.get("title", "").lower() or
                     author.lower() in news_item.get("description", "").lower()):
                     results.append(news_item.get("domain"))
+    st.write(f"Top stories mentions: {results}")
     return results
 
 def extract_topical_associated_domains(items: list, author: str) -> set:
+    st.markdown("**DEBUG: extract_topical_associated_domains**")
     domains = set()
     for item in items:
         if item.get("type") == "organic" and "domain" in item:
@@ -156,10 +213,13 @@ def extract_topical_associated_domains(items: list, author: str) -> set:
                 author.lower() in item.get("description", "").lower()):
                 if not any(re.search(pattern, domain) for pattern in EXCLUDED_GENERIC_DOMAINS_REGEX):
                     domains.add(domain)
+    st.write(f"Topical associated domains: {domains}")
     return domains
 
 @st.cache_data(ttl=3600)
 def make_dataforseo_call(payload: dict):
+    st.markdown("**DEBUG: make_dataforseo_call**")
+    st.write(f"Payload: {payload}")
     try:
         if not isinstance(payload, list):
             payload = [payload]
@@ -169,30 +229,27 @@ def make_dataforseo_call(payload: dict):
         response = requests.post(DATAFORSEO_ORGANIC_URL, auth=(API_USERNAME, API_PASSWORD), json=payload, timeout=60)
         response.raise_for_status()
         response_json = response.json()
-        # Flatten for unified handling
+        st.write("DEBUG: Raw DataForSEO API response:")
+        st.json(response_json)
         if isinstance(response_json, dict) and "tasks" in response_json:
             flat = []
             for t in response_json["tasks"]:
                 for r in t.get("result", []):
                     flat.append(r)
             if flat:
+                st.write("DEBUG: Flattened response to list for unified handling.")
+                st.json(flat)
                 return flat
         return response_json
-    except requests.exceptions.HTTPError as http_err:
-        error_msg = f"DataForSEO HTTP error ({response.status_code}): {http_err} - {response.text}"
-        st.error(f"API Call Error: {error_msg}")
-        return {"error": error_msg}
-    except requests.exceptions.RequestException as req_err:
-        error_msg = f"DataForSEO API request error: {req_err}"
-        st.error(f"API Call Error: {error_msg}")
-        return {"error": error_msg}
     except Exception as e:
-        error_msg = f"An unexpected error occurred during DataForSEO call: {e}"
-        st.error(f"API Call Error: {error_msg}")
-        return {"error": error_msg}
+        st.error(f"API Call Error: {e}")
+        return {"error": str(e)}
 
 def check_knowledge_panel_from_data(author: str, data_for_author_only):
+    st.markdown("**DEBUG: check_knowledge_panel_from_data**")
     items = extract_items_for_keyword(data_for_author_only, f'"{author}"')
+    for idx, item in enumerate(items):
+        st.write(f"Item {idx} type: {item.get('type')}, title: {item.get('title')}")
     return extract_knowledge_panel(items, author)
 
 @st.cache_data(ttl=3600)
@@ -209,13 +266,12 @@ def check_wikipedia(author: str):
             wikipedia_url = pages[page_id].get("fullurl", "")
             return True, "Wikipedia page found", wikipedia_url
         return False, "No Wikipedia page found", ""
-    except requests.exceptions.RequestException as e:
-        return False, f"Wikipedia API error: {e}", ""
     except Exception as e:
-        return False, f"An unexpected error occurred checking Wikipedia: {e}", ""
+        return False, f"Wikipedia API error: {e}", ""
 
 @st.cache_data(ttl=3600)
 def analyze_topical_serp(author: str, topic: str):
+    st.markdown("**DEBUG: analyze_topical_serp**")
     author_only_query = f'"{author}"'
     payloads = [{"keyword": author_only_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"}]
     author_topic_query_str = ""
@@ -234,6 +290,7 @@ def analyze_topical_serp(author: str, topic: str):
             unique_payloads.append(p)
             seen_keywords.add(p["keyword"])
     batch_data_response = make_dataforseo_call(unique_payloads)
+    debug_section("DataForSEO batch_data_response", batch_data_response)
     topical_authority_serp_count = 0
     topical_authority_ratio = 0.0
     ai_overview_summary = "N/A"
@@ -439,41 +496,8 @@ st.markdown("---")
 
 if st.session_state['triggered_single_analysis'] and st.session_state['single_author_display_results'] is not None:
     st.subheader("Individual Author Analysis Results")
-    def highlight_score_color_row(s):
-        score_val = s['Quality_Score']
-        if score_val >= 70:
-            return ['background-color: #d4edda'] * len(s)
-        elif score_val >= 40:
-            return ['background-color: #ffeeba'] * len(s)
-        else:
-            return ['background-color: #f8d7da'] * len(s)
-    def highlight_tick_cross_bg_cell(val):
-        if '✅' in str(val):
-            return 'background-color: #e0ffe0'
-        elif '❌' in str(val):
-            return 'background-color: #fff0f0'
-        return ''
-    def make_clickable_wikipedia(val):
-        if val and val != "N/A":
-            return f'<a href="{val}" target="_blank">Link</a>'
-        return val
-    styled_single_df = st.session_state['single_author_display_results'].style.apply(
-        highlight_score_color_row, axis=1
-    ).applymap(
-        highlight_tick_cross_bg_cell,
-        subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page', 'Has_Perspectives']
-    ).format(make_clickable_wikipedia, subset=['Wikipedia_URL'], escape=False) \
-    .format({
-        'Topical_Authority_SERP_Count': "{:,.0f}",
-        'Topical_Authority_Ratio': "{:.2f}%",
-        'Scholar_Citations_Count': "{:,.0f}",
-        'LinkedIn_Followers': "{:,.0f}",
-        'X_Followers': "{:,.0f}",
-        'Instagram_Followers': "{:,.0f}",
-        'TikTok_Followers': "{:,.0f}",
-        'Facebook_Followers': "{:,.0f}"
-    })
-    st.dataframe(styled_single_df, use_container_width=True)
+    st.markdown("**DEBUG: Displaying single author result**")
+    st.dataframe(st.session_state['single_author_display_results'], use_container_width=True)
     st.session_state['triggered_single_analysis'] = False
     st.session_state['single_author_display_results'] = None
 
@@ -548,50 +572,7 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
     st.session_state['triggered_bulk_analysis'] = False
     st.session_state['bulk_data_to_process'] = None
     st.markdown("### High-Level Summary")
-    col_sum1, col_sum2, col_sum3 = st.columns(3)
-    with col_sum1:
-        st.metric("Total Authors Analyzed", total_authors)
-    with col_sum2:
-        kp_count = results_df["Has_Knowledge_Panel"].value_counts().get("✅ Yes", 0)
-        st.metric("Authors with Knowledge Panels", kp_count)
-    with col_sum3:
-        wiki_count = results_df["Has_Wikipedia_Page"].value_counts().get("✅ Yes", 0)
-        st.metric("Authors with Wikipedia Pages", wiki_count)
-    st.markdown("---")
-    st.markdown("### Detailed Results Table")
-    def highlight_score_color_cell_bulk(val):
-        score_val = int(val)
-        if score_val >= 70:
-            return 'background-color: #d4edda'
-        elif score_val >= 40:
-            return 'background-color: #ffeeba'
-        else:
-            return 'background-color: #f8d7da'
-    def highlight_tick_cross_bg_cell_bulk(val):
-        if '✅' in str(val):
-            return 'background-color: #e0ffe0'
-        elif '❌' in str(val):
-            return 'background-color: #fff0f0'
-        return ''
-    def make_clickable_wikipedia_bulk(val):
-        if val and val != "N/A":
-            return f'<a href="{val}" target="_blank">Link</a>'
-        return val
-    styled_df = results_df.style \
-        .map(highlight_score_color_cell_bulk, subset=['Quality_Score']) \
-        .applymap(highlight_tick_cross_bg_cell_bulk, subset=['Has_Knowledge_Panel', 'Has_Wikipedia_Page', 'Has_Perspectives']) \
-        .format({
-            'Topical_Authority_SERP_Count': "{:,.0f}",
-            'Topical_Authority_Ratio': "{:.2f}%",
-            'Scholar_Citations_Count': "{:,.0f}",
-            'LinkedIn_Followers': "{:,.0f}",
-            'X_Followers': "{:,.0f}",
-            'Instagram_Followers': "{:,.0f}",
-            'TikTok_Followers': "{:,.0f}",
-            'Facebook_Followers': "{:,.0f}"
-        }) \
-        .format(make_clickable_wikipedia_bulk, subset=['Wikipedia_URL'], escape=False)
-    st.dataframe(styled_df, use_container_width=True, height=500)
+    st.dataframe(results_df, use_container_width=True)
     csv_output = results_df.to_csv(index=False).encode('utf-8')
     st.download_button(
         label="Download Results as CSV",
