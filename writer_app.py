@@ -46,8 +46,15 @@ EXCLUDED_GENERIC_DOMAINS_REGEX = [
 ]
 
 # --- Utility: Robust parsing for DataforSEO items ---
-def extract_items_for_keyword(dataforseo_response: dict, keyword: str) -> list:
-    """Given a DataforSEO response dict and a keyword, return the 'items' list for that keyword."""
+def extract_items_for_keyword(dataforseo_response, keyword: str):
+    if isinstance(dataforseo_response, list):
+        for result in dataforseo_response:
+            kw = str(result.get("keyword", "")).strip()
+            if kw == keyword or kw == f'"{keyword}"':
+                return result.get("items", [])
+        if dataforseo_response:
+            return dataforseo_response[0].get("items", [])
+        return []
     try:
         tasks = dataforseo_response.get("tasks", [])
         for task in tasks:
@@ -59,7 +66,6 @@ def extract_items_for_keyword(dataforseo_response: dict, keyword: str) -> list:
                     items = result0.get("items", [])
                     if isinstance(items, list):
                         return items
-        # fallback: just return items from first task/result if keyword match fails
         if tasks:
             result = tasks[0].get("result", [])
             if result and isinstance(result, list):
@@ -70,8 +76,15 @@ def extract_items_for_keyword(dataforseo_response: dict, keyword: str) -> list:
     except Exception:
         return []
 
-def extract_se_results_count(dataforseo_response: dict, keyword: str) -> int:
-    """Extracts 'se_results_count' from the result block for a given keyword."""
+def extract_se_results_count(dataforseo_response, keyword: str):
+    if isinstance(dataforseo_response, list):
+        for result in dataforseo_response:
+            kw = str(result.get("keyword", "")).strip()
+            if kw == keyword or kw == f'"{keyword}"':
+                return int(result.get("se_results_count", 0))
+        if dataforseo_response:
+            return int(dataforseo_response[0].get("se_results_count", 0))
+        return 0
     try:
         tasks = dataforseo_response.get("tasks", [])
         for task in tasks:
@@ -91,7 +104,6 @@ def extract_se_results_count(dataforseo_response: dict, keyword: str) -> int:
         return 0
 
 def extract_perspectives_domains(items: list) -> set:
-    """Extract domains from 'perspectives' block in items."""
     domains = set()
     for item in items:
         if item.get("type") == "perspectives":
@@ -146,10 +158,8 @@ def extract_topical_associated_domains(items: list, author: str) -> set:
                     domains.add(domain)
     return domains
 
-# --- Helper Function for API Call ---
 @st.cache_data(ttl=3600)
-def make_dataforseo_call(payload: dict) -> dict:
-    """Helper function to make DataForSEO API requests."""
+def make_dataforseo_call(payload: dict):
     try:
         if not isinstance(payload, list):
             payload = [payload]
@@ -159,10 +169,14 @@ def make_dataforseo_call(payload: dict) -> dict:
         response = requests.post(DATAFORSEO_ORGANIC_URL, auth=(API_USERNAME, API_PASSWORD), json=payload, timeout=60)
         response.raise_for_status()
         response_json = response.json()
-        # Uncomment for debugging
-        # st.markdown(f"--- 🐛 DEBUG: RAW DataForSEO Response for Keyword: `{payload[0].get('keyword', 'N/A') if payload else 'N/A'}` ---")
-        # st.json(response_json)
-        # st.markdown("--- 🐛 END RAW DataForSEO Response ---")
+        # Flatten for unified handling
+        if isinstance(response_json, dict) and "tasks" in response_json:
+            flat = []
+            for t in response_json["tasks"]:
+                for r in t.get("result", []):
+                    flat.append(r)
+            if flat:
+                return flat
         return response_json
     except requests.exceptions.HTTPError as http_err:
         error_msg = f"DataForSEO HTTP error ({response.status_code}): {http_err} - {response.text}"
@@ -177,15 +191,12 @@ def make_dataforseo_call(payload: dict) -> dict:
         st.error(f"API Call Error: {error_msg}")
         return {"error": error_msg}
 
-def check_knowledge_panel_from_data(author: str, data_for_author_only: dict) -> tuple[bool, str]:
+def check_knowledge_panel_from_data(author: str, data_for_author_only):
     items = extract_items_for_keyword(data_for_author_only, f'"{author}"')
-    # Debug: Print out all item types
-    # for idx, item in enumerate(items):
-    #     st.write(f"Item {idx}: type={item.get('type')}, title={item.get('title')}")
     return extract_knowledge_panel(items, author)
 
 @st.cache_data(ttl=3600)
-def check_wikipedia(author: str) -> tuple[bool, str, str]:
+def check_wikipedia(author: str):
     wiki_author_query = author.replace(' ', '_')
     wikipedia_api_url = f"https://en.wikipedia.org/w/api.php?action=query&titles={wiki_author_query}&prop=info&inprop=url&format=json"
     try:
@@ -204,7 +215,7 @@ def check_wikipedia(author: str) -> tuple[bool, str, str]:
         return False, f"An unexpected error occurred checking Wikipedia: {e}", ""
 
 @st.cache_data(ttl=3600)
-def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list[str], list[str], list[str], dict]:
+def analyze_topical_serp(author: str, topic: str):
     author_only_query = f'"{author}"'
     payloads = [{"keyword": author_only_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"}]
     author_topic_query_str = ""
@@ -246,7 +257,7 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
             sorted(list(perspectives_domains)), author_only_data_task)
 
 @st.cache_data(ttl=3600)
-def get_author_associated_brands(author: str) -> tuple[list[str], list[str]]:
+def get_author_associated_brands(author: str):
     search_query = f'"{author}"'
     payload = {"keyword": search_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"}
     data = make_dataforseo_call(payload)
