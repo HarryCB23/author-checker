@@ -61,6 +61,16 @@ def check_knowledge_panel(author: str) -> tuple[bool, str]:
                                     for sub_item in item["items"]:
                                         if author.lower() in sub_item.get("text", "").lower() or author.lower() in sub_item.get("title", "").lower():
                                             return True, "Knowledge Panel found (sub-item)"
+                    if result_block.get("items"):
+                        for nested_item in result_block["items"]:
+                            if nested_item.get("type") == "knowledge_graph":
+                                kp_title = nested_item.get("title", "").lower()
+                                if kp_title == author.lower() or author.lower() in nested_item.get("description", "").lower():
+                                    return True, "Knowledge Panel found (nested item)"
+                                if "items" in nested_item:
+                                    for sub_item_nested in nested_item["items"]:
+                                        if author.lower() in sub_item_nested.get("text", "").lower() or author.lower() in sub_item_nested.get("title", "").lower():
+                                            return True, "Knowledge Panel found (nested item sub-item)"
     return False, "No Knowledge Panel found"
 
 # --- Topical SERP Analysis ---
@@ -100,10 +110,14 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
 
     if "result" in author_only_data_task and author_only_data_task["result"]:
         for result_block in author_only_data_task["result"]:
-            if "items" in result_block:
-                for item in result_block["items"]:
-                    if item.get("type") == "perspectives" and item.get("items"):
-                        for perspective_item in item["items"]:
+            if result_block.get("type") == "perspectives" and result_block.get("items"):
+                for perspective_item in result_block["items"]:
+                    if perspective_item.get("domain"):
+                        perspectives_domains.add(perspective_item["domain"])
+            if result_block.get("items"):
+                for nested_item in result_block["items"]:
+                    if nested_item.get("type") == "perspectives" and nested_item.get("items"):
+                        for perspective_item in nested_item["items"]:
                             if perspective_item.get("domain"):
                                 perspectives_domains.add(perspective_item["domain"])
 
@@ -145,7 +159,7 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
                     if author.lower() in news_item.get("title", "").lower() or author.lower() in news_item.get("description", "").lower():
                         top_stories_mentions.append(news_item.get("domain"))
 
-            if "items" in result_item:
+            if result_item.get("items"):
                 for item in result_item["items"]:
                     if item.get("type") == "organic" and "domain" in item:
                         domain = item["domain"]
@@ -155,82 +169,3 @@ def analyze_topical_serp(author: str, topic: str) -> tuple[int, float, str, list
 
     return (author_topic_results_count, topical_authority_ratio, ai_overview_summary,
             sorted(list(set(top_stories_mentions))), sorted(list(topical_associated_domains)), sorted(list(perspectives_domains)))
-
-# --- Scoring System ---
-def calculate_quality_score(has_kp, authority_ratio, top_stories, topical_domains, perspectives_domains):
-    score = 0
-    if has_kp:
-        score += 30
-    if authority_ratio > 10:
-        score += min(int(authority_ratio), 30)
-    if top_stories:
-        score += min(len(top_stories) * 5, 15)
-    if topical_domains:
-        score += min(len(topical_domains) * 2, 15)
-    if perspectives_domains:
-        score += min(len(perspectives_domains) * 2, 10)
-    return min(score, 100)
-
-# --- Streamlit UI ---
-st.title("Author Quality Evaluator")
-
-st.sidebar.header("Author Search")
-author = st.sidebar.text_input("Author Name")
-topic = st.sidebar.text_input("Optional Topic")
-
-if st.sidebar.button("Analyze Author"):
-    if author:
-        with st.spinner(f"Analyzing {author}..."):
-            has_kp, kp_message = check_knowledge_panel(author)
-            serp_count, authority_ratio, ai_summary, top_stories, topical_domains, perspectives_domains = analyze_topical_serp(author, topic)
-
-            quality_score = calculate_quality_score(has_kp, authority_ratio, top_stories, topical_domains, perspectives_domains)
-
-        st.write(f"### Results for {author}")
-        st.write(f"**Knowledge Panel:** {'✅ Found' if has_kp else '❌ Not Found'}")
-        st.write(f"**Details:** {kp_message}")
-        st.write(f"**Topical Authority Ratio:** {authority_ratio:.2f}%")
-        st.write(f"**AI Overview Summary:** {ai_summary}")
-        st.write(f"**Top Stories Mentions:** {', '.join(top_stories) if top_stories else 'None'}")
-        st.write(f"**Topical Associated Domains:** {', '.join(topical_domains) if topical_domains else 'None'}")
-        st.write(f"**Perspectives Domains:** {', '.join(perspectives_domains) if perspectives_domains else 'None'}")
-        st.write(f"**Quality Score:** {quality_score}/100")
-    else:
-        st.warning("Please enter an author name to analyze.")
-
-# --- Bulk Analysis ---
-st.sidebar.header("Bulk Author Upload")
-bulk_file = st.sidebar.file_uploader("Upload CSV with Author and Topic columns", type=["csv"])
-
-if bulk_file is not None:
-    df_bulk = pd.read_csv(bulk_file)
-    results = []
-
-    if st.sidebar.button("Run Bulk Analysis"):
-        for idx, row in df_bulk.iterrows():
-            author = str(row["Author"]).strip()
-            topic = str(row["Topic"]).strip() if "Topic" in row else ""
-
-            has_kp, kp_message = check_knowledge_panel(author)
-            serp_count, authority_ratio, ai_summary, top_stories, topical_domains, perspectives_domains = analyze_topical_serp(author, topic)
-            quality_score = calculate_quality_score(has_kp, authority_ratio, top_stories, topical_domains, perspectives_domains)
-
-            results.append({
-                "Author": author,
-                "Topic": topic,
-                "Knowledge Panel": "Yes" if has_kp else "No",
-                "Topical Authority Ratio": f"{authority_ratio:.2f}%",
-                "AI Overview": ai_summary,
-                "Top Stories Count": len(top_stories),
-                "Topical Domains Count": len(topical_domains),
-                "Perspectives Count": len(perspectives_domains),
-                "Quality Score": quality_score
-            })
-            time.sleep(1)
-
-        df_results = pd.DataFrame(results)
-        st.write("### Bulk Analysis Results")
-        st.dataframe(df_results)
-
-        csv_download = df_results.to_csv(index=False).encode('utf-8')
-        st.download_button("Download Results as CSV", data=csv_download, file_name="author_quality_results.csv", mime="text/csv")
