@@ -37,7 +37,7 @@ EXCLUDED_GENERIC_DOMAINS_REGEX = [
     r"waterstones\.com", r"penguinrandomhouse\.com", r"penguin\.co\.uk",
     r"barr\.com", r"american\.edu", r"ashenden\.org",
     r"arrse\.co\.uk", r"mumsnet\.com",
-    r"ebay\.com", r"pangobooks\.com", r"gettyimages\.co\.uk",
+    r"ebay\.com", r"pangobooks\.com", r"gettyimages\.co.uk",
     r"socialistworker\.co\.uk", r"newstatesman\.com", r"spectator\.co.uk",
     r"echo-news\.co\.uk", r"times-series\.co.uk", r"thenational\.scot", r"oxfordmail\.co.uk",
     r"moneyweek\.com", r"politeia\.co.uk", r"theweek\.com",
@@ -74,14 +74,18 @@ def extract_items_from_tasks(response, keyword):
         for task in response.get("tasks", []):
             task_kw = task.get("data", {}).get("keyword", "").replace('"','').strip().lower()
             if task_kw == keyword.replace('"','').strip().lower():
-                for result in task.get("result", []):
-                    if "items" in result:
-                        return result["items"]
+                results = task.get("result")
+                if results and isinstance(results, list):
+                    for result in results:
+                        if isinstance(result, dict) and "items" in result and isinstance(result["items"], list):
+                            return result["items"]
         # Fallback: return any items found
         for task in response.get("tasks", []):
-            for result in task.get("result", []):
-                if "items" in result:
-                    return result["items"]
+            results = task.get("result")
+            if results and isinstance(results, list):
+                for result in results:
+                    if isinstance(result, dict) and "items" in result and isinstance(result["items"], list):
+                        return result["items"]
     except Exception as e:
         st.error(f"Error extracting items: {e}")
     return []
@@ -90,12 +94,19 @@ def extract_se_results_count(response, keyword):
     try:
         for task in response.get("tasks", []):
             task_kw = task.get("data", {}).get("keyword", "").replace('"','').strip().lower()
-            if task_kw == keyword.replace('"','').strip().lower():
-                for result in task.get("result", []):
-                    return int(result.get("se_results_count", 0))
+            results = task.get("result")
+            if results and isinstance(results, list):
+                if task_kw == keyword.replace('"','').strip().lower():
+                    for result in results:
+                        if isinstance(result, dict):
+                            return int(result.get("se_results_count", 0))
+        # fallback
         for task in response.get("tasks", []):
-            for result in task.get("result", []):
-                return int(result.get("se_results_count", 0))
+            results = task.get("result")
+            if results and isinstance(results, list):
+                for result in results:
+                    if isinstance(result, dict):
+                        return int(result.get("se_results_count", 0))
     except Exception as e:
         st.error(f"Error extracting se_results_count: {e}")
     return 0
