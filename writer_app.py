@@ -39,7 +39,7 @@ EXCLUDED_GENERIC_DOMAINS_REGEX = [
     r"arrse\.co\.uk", r"mumsnet\.com",
     r"ebay\.com", r"pangobooks\.com", r"gettyimages\.co\.uk",
     r"socialistworker\.co\.uk", r"newstatesman\.com", r"spectator\.co.uk",
-    r"echo-news\.co\.uk", r"times-series\.co.uk", r"thenational\.scot", r"oxfordmail\.co.uk",
+    r"echo-news\.co\.uk", r"times-series\.co.uk", r"thenational\.scot", r"oxfordmail\.co\.uk",
     r"moneyweek\.com", r"politeia\.co.uk", r"theweek\.com",
     r"innertemplelibrary\.com", r"san\.com", r"unherd\.com", r"padstudio\.co\.uk",
     r"deepsouthmedia\.co\.uk", r"dorsetchamber\.co\.uk", r"mattrossphysiotherapy\.co\.uk",
@@ -70,16 +70,20 @@ def make_dataforseo_call(payload):
         return {"error": str(e)}
 
 def extract_items_from_tasks(response, keyword):
+    # Always return the full items array for the keyword, or fallback to any items
     try:
+        # Try to match keyword
         for task in response.get("tasks", []):
             task_kw = task.get("data", {}).get("keyword", "").replace('"','').strip().lower()
             if task_kw == keyword.replace('"','').strip().lower():
                 for result in task.get("result", []):
-                    return result.get("items", [])
-        # fallback
+                    if "items" in result:
+                        return result["items"]
+        # Fallback: return any items found
         for task in response.get("tasks", []):
             for result in task.get("result", []):
-                return result.get("items", [])
+                if "items" in result:
+                    return result["items"]
     except Exception as e:
         st.error(f"Error extracting items: {e}")
     return []
@@ -116,6 +120,7 @@ def check_knowledge_panel(author):
     payload = { "keyword": keyword, "language_code": "en", "location_name": "United Kingdom", "device": "desktop" }
     response = make_dataforseo_call(payload)
     items = extract_items_from_tasks(response, keyword)
+    # --- FIX: Find first item with type: knowledge_graph
     for item in items:
         if item.get("type") == "knowledge_graph":
             return True, item.get("title"), item.get("description", "")
