@@ -39,7 +39,7 @@ EXCLUDED_GENERIC_DOMAINS_REGEX = [
     r"arrse\.co\.uk", r"mumsnet\.com",
     r"ebay\.com", r"pangobooks\.com", r"gettyimages\.co\.uk",
     r"socialistworker\.co\.uk", r"newstatesman\.com", r"spectator\.co.uk",
-    r"echo-news\.co\.uk", r"times-series\.co\.uk", r"thenational\.scot", r"oxfordmail\.co\.uk",
+    r"echo-news\.co\.uk", r"times-series\.co.uk", r"thenational\.scot", r"oxfordmail\.co\.uk",
     r"moneyweek\.com", r"politeia\.co.uk", r"theweek\.com",
     r"innertemplelibrary\.com", r"san\.com", r"unherd\.com", r"padstudio\.co\.uk",
     r"deepsouthmedia\.co\.uk", r"dorsetchamber\.co\.uk", r"mattrossphysiotherapy\.co\.uk",
@@ -53,133 +53,95 @@ def debug_section(title, obj):
         st.markdown(f"**DEBUG: {title}**")
         st.json(obj)
 
-# --- Utility: Robust parsing for DataforSEO items ---
-def extract_items_for_keyword(dataforseo_response, keyword: str):
-    # Handles both array (list) and old dict ("tasks") root structures
-    st.markdown("**DEBUG: extract_items_for_keyword call**")
-    st.write(f"Type of input: {type(dataforseo_response)} | Searching for keyword: {keyword}")
+@st.cache_data(ttl=3600)
+def make_dataforseo_call(payload):
+    try:
+        if not isinstance(payload, list):
+            payload = [payload]
+        for p in payload:
+            if "limit" not in p:
+                p["limit"] = 20
+        response = requests.post(DATAFORSEO_ORGANIC_URL, auth=(API_USERNAME, API_PASSWORD), json=payload, timeout=60)
+        response.raise_for_status()
+        response_json = response.json()
+        return response_json
+    except Exception as e:
+        st.error(f"API Call Error: {e}")
+        return {"error": str(e)}
 
-    # Accept both quoted/unquoted
-    def kw_match(kw1, kw2):
-        return kw1.replace('"','').strip().lower() == kw2.replace('"','').strip().lower()
-
-    if isinstance(dataforseo_response, list):
-        st.write(f"DEBUG: Root is a LIST with {len(dataforseo_response)} items.")
-        for result in dataforseo_response:
-            kw = str(result.get("keyword", "")).strip()
-            st.write(f"DEBUG: Checking kw={kw} vs keyword={keyword}")
-            if kw_match(kw, keyword):
-                st.write("DEBUG: MATCHED keyword in DataforSEO LIST root")
-                debug_section("items (LIST root match)", result.get("items", []))
-                return result.get("items", [])
+def extract_items_from_tasks(response, keyword):
+    try:
+        for task in response.get("tasks", []):
+            task_kw = task.get("data", {}).get("keyword", "").replace('"','').strip().lower()
+            if task_kw == keyword.replace('"','').strip().lower():
+                for result in task.get("result", []):
+                    return result.get("items", [])
         # fallback
-        if dataforseo_response:
-            st.warning("DEBUG: No keyword match in LIST root. Returning first element's items.")
-            debug_section("items (LIST root fallback)", dataforseo_response[0].get("items", []))
-            return dataforseo_response[0].get("items", [])
-        st.error("DEBUG: DataforSEO LIST root is empty.")
-        return []
-    elif isinstance(dataforseo_response, dict):
-        st.write("DEBUG: Root is a DICT.")
-        tasks = dataforseo_response.get("tasks", [])
-        st.write(f"DEBUG: Found {len(tasks)} tasks.")
-        for task in tasks:
-            task_kw = str(task.get("keyword", "")).strip()
-            st.write(f"DEBUG: Checking task_kw={task_kw} vs keyword={keyword}")
-            if kw_match(task_kw, keyword):
-                result = task.get("result", [])
-                if result and isinstance(result, list):
-                    result0 = result[0]
-                    debug_section("items (DICT root match)", result0.get("items", []))
-                    return result0.get("items", [])
-        # fallback: just return items from first task/result if keyword match fails
-        if tasks:
-            st.warning("DEBUG: No keyword match in DICT root. Returning first task/result's items.")
-            result = tasks[0].get("result", [])
-            if result and isinstance(result, list):
-                debug_section("items (DICT root fallback)", result[0].get("items", []))
-                return result[0].get("items", [])
-        st.error("DEBUG: No tasks in DICT root.")
-        return []
-    else:
-        st.error("DEBUG: DataforSEO response is neither list nor dict.")
-        return []
+        for task in response.get("tasks", []):
+            for result in task.get("result", []):
+                return result.get("items", [])
+    except Exception as e:
+        st.error(f"Error extracting items: {e}")
+    return []
 
-def extract_se_results_count(dataforseo_response, keyword: str):
-    st.markdown("**DEBUG: extract_se_results_count call**")
-    st.write(f"Type of input: {type(dataforseo_response)} | Searching for keyword: {keyword}")
-    def kw_match(kw1, kw2):
-        return kw1.replace('"','').strip().lower() == kw2.replace('"','').strip().lower()
-    if isinstance(dataforseo_response, list):
-        for result in dataforseo_response:
-            kw = str(result.get("keyword", "")).strip()
-            if kw_match(kw, keyword):
-                val = int(result.get("se_results_count", 0))
-                st.write(f"DEBUG: Found SERP count in LIST root: {val}")
-                return val
-        if dataforseo_response:
-            val = int(dataforseo_response[0].get("se_results_count", 0))
-            st.warning("DEBUG: No keyword match in LIST root for SERP count. Returning first element's count.")
-            return val
-        st.error("DEBUG: DataforSEO LIST root is empty for SERP count.")
-        return 0
-    elif isinstance(dataforseo_response, dict):
-        tasks = dataforseo_response.get("tasks", [])
-        for task in tasks:
-            task_kw = str(task.get("keyword", "")).strip()
-            if kw_match(task_kw, keyword):
-                result = task.get("result", [])
-                if result and isinstance(result, list):
-                    val = int(result[0].get("se_results_count", 0))
-                    st.write(f"DEBUG: Found SERP count in DICT root: {val}")
-                    return val
-        if tasks:
-            val = int(tasks[0].get("result", [{}])[0].get("se_results_count", 0))
-            st.warning("DEBUG: No keyword match in DICT root for SERP count. Returning first task/result's count.")
-            return val
-        st.error("DEBUG: No tasks in DICT root for SERP count.")
-        return 0
-    else:
-        st.error("DEBUG: DataforSEO response is neither list nor dict (SERP count).")
-        return 0
+def extract_se_results_count(response, keyword):
+    try:
+        for task in response.get("tasks", []):
+            task_kw = task.get("data", {}).get("keyword", "").replace('"','').strip().lower()
+            if task_kw == keyword.replace('"','').strip().lower():
+                for result in task.get("result", []):
+                    return int(result.get("se_results_count", 0))
+        # fallback
+        for task in response.get("tasks", []):
+            for result in task.get("result", []):
+                return int(result.get("se_results_count", 0))
+    except Exception as e:
+        st.error(f"Error extracting se_results_count: {e}")
+    return 0
 
-def extract_perspectives_domains(items: list) -> set:
-    st.markdown("**DEBUG: extract_perspectives_domains**")
-    st.write(f"items: {len(items)}")
-    domains = set()
-    for idx, item in enumerate(items):
-        st.write(f"Item {idx} type: {item.get('type')}")
-        if item.get("type") == "perspectives":
-            st.write(f"Item {idx} is a perspectives block.")
-            for perspective_item in item.get("items", []):
-                st.write(f"Domain: {perspective_item.get('domain')}")
-                if perspective_item.get("domain"):
-                    domains.add(perspective_item["domain"])
-    st.write(f"Perspectives domains found: {domains}")
-    return domains
+# --- Targeted Extraction Functions ---
 
-def extract_knowledge_panel(items, entity_name: str):
-    st.markdown("**DEBUG: extract_knowledge_panel**")
-    st.write(f"Looking for KP with entity_name: '{entity_name}' in {len(items)} items")
-    for idx, item in enumerate(items):
-        st.write(f"Item {idx}: type={item.get('type')} | title={item.get('title')}")
-        if item.get("type") == "knowledge_graph":
-            kp_title = item.get("title", "").lower()
-            st.write(f"Item {idx} is a knowledge_graph. Title: {kp_title}")
-            if kp_title == entity_name.lower() or entity_name.lower() in kp_title:
-                st.success(f"Knowledge Panel found by title match: {kp_title}")
-                return True, "Knowledge Panel found"
-            if entity_name.lower() in item.get("description", "").lower():
-                st.success(f"Knowledge Panel found by description match.")
-                return True, "Knowledge Panel found (by description)"
-    st.warning("No Knowledge Panel found.")
-    return False, "No Knowledge Panel found"
-
-def extract_ai_overview(items: list) -> str:
-    st.markdown("**DEBUG: extract_ai_overview**")
+def check_wikipedia(author):
+    keyword = f'"{author}" site:wikipedia.org'
+    payload = { "keyword": keyword, "language_code": "en", "location_name": "United Kingdom", "device": "desktop" }
+    response = make_dataforseo_call(payload)
+    items = extract_items_from_tasks(response, keyword)
     for item in items:
-        if item.get("type") == "ai_overview" and item.get("ai_overview"):
-            ai_overview_content = item["ai_overview"]
+        if item.get("domain", "") == "en.wikipedia.org":
+            return True, item.get("url")
+    return False, None
+
+def check_knowledge_panel(author):
+    keyword = f'"{author}"'
+    payload = { "keyword": keyword, "language_code": "en", "location_name": "United Kingdom", "device": "desktop" }
+    response = make_dataforseo_call(payload)
+    items = extract_items_from_tasks(response, keyword)
+    for item in items:
+        if item.get("type") == "knowledge_graph":
+            return True, item.get("title"), item.get("description", "")
+    return False, None, None
+
+def extract_perspectives(author):
+    keyword = f'"{author}"'
+    payload = { "keyword": keyword, "language_code": "en", "location_name": "United Kingdom", "device": "desktop" }
+    response = make_dataforseo_call(payload)
+    items = extract_items_from_tasks(response, keyword)
+    perspectives_domains = set()
+    for item in items:
+        if item.get("type") == "perspectives":
+            for perspective_item in item.get("items", []):
+                if perspective_item.get("domain"):
+                    perspectives_domains.add(perspective_item["domain"])
+    return sorted(list(perspectives_domains))
+
+def extract_ai_overview(author):
+    keyword = f'"{author}"'
+    payload = { "keyword": keyword, "language_code": "en", "location_name": "United Kingdom", "device": "desktop" }
+    response = make_dataforseo_call(payload)
+    items = extract_items_from_tasks(response, keyword)
+    for item in items:
+        if item.get("type") == "ai_overview":
+            ai_overview_content = item.get("ai_overview", {})
             if ai_overview_content.get("summary"):
                 ai_overview_summary = ai_overview_content["summary"].strip()
                 return ai_overview_summary[:500] + "..." if len(ai_overview_summary) > 500 else ai_overview_summary
@@ -191,127 +153,43 @@ def extract_ai_overview(items: list) -> str:
                 return "AI Overview present (content loading dynamically)."
     return "N/A"
 
-def extract_top_stories_mentions(items: list, author: str) -> list:
-    st.markdown("**DEBUG: extract_top_stories_mentions**")
-    results = []
+def check_google_scholar_citations(author):
+    keyword = f'"{author}" "cited by" site:scholar.google.com'
+    payload = { "keyword": keyword, "language_code": "en", "location_name": "United Kingdom", "device": "desktop" }
+    response = make_dataforseo_call(payload)
+    items = extract_items_from_tasks(response, keyword)
+    count = 0
     for item in items:
-        if item.get("type") == "top_stories" and item.get("items"):
-            for news_item in item["items"]:
-                if (author.lower() in news_item.get("title", "").lower() or
-                    author.lower() in news_item.get("description", "").lower()):
-                    results.append(news_item.get("domain"))
-    st.write(f"Top stories mentions: {results}")
-    return results
-
-def extract_topical_associated_domains(items: list, author: str) -> set:
-    st.markdown("**DEBUG: extract_topical_associated_domains**")
-    domains = set()
-    for item in items:
-        if item.get("type") == "organic" and "domain" in item:
-            domain = item["domain"]
-            if (author.lower() in item.get("title", "").lower() or
-                author.lower() in item.get("description", "").lower()):
-                if not any(re.search(pattern, domain) for pattern in EXCLUDED_GENERIC_DOMAINS_REGEX):
-                    domains.add(domain)
-    st.write(f"Topical associated domains: {domains}")
-    return domains
-
-@st.cache_data(ttl=3600)
-def make_dataforseo_call(payload: dict):
-    st.markdown("**DEBUG: make_dataforseo_call**")
-    st.write(f"Payload: {payload}")
-    try:
-        if not isinstance(payload, list):
-            payload = [payload]
-        for p in payload:
-            if "limit" not in p:
-                p["limit"] = 20
-        response = requests.post(DATAFORSEO_ORGANIC_URL, auth=(API_USERNAME, API_PASSWORD), json=payload, timeout=60)
-        response.raise_for_status()
-        response_json = response.json()
-        st.write("DEBUG: Raw DataForSEO API response:")
-        st.json(response_json)
-        if isinstance(response_json, dict) and "tasks" in response_json:
-            flat = []
-            for t in response_json["tasks"]:
-                for r in t.get("result", []):
-                    flat.append(r)
-            if flat:
-                st.write("DEBUG: Flattened response to list for unified handling.")
-                st.json(flat)
-                return flat
-        return response_json
-    except Exception as e:
-        st.error(f"API Call Error: {e}")
-        return {"error": str(e)}
-
-def check_knowledge_panel_from_data(author: str, data_for_author_only):
-    st.markdown("**DEBUG: check_knowledge_panel_from_data**")
-    items = extract_items_for_keyword(data_for_author_only, f'"{author}"')
-    for idx, item in enumerate(items):
-        st.write(f"Item {idx} type: {item.get('type')}, title: {item.get('title')}")
-    return extract_knowledge_panel(items, author)
-
-@st.cache_data(ttl=3600)
-def check_wikipedia(author: str):
-    wiki_author_query = author.replace(' ', '_')
-    wikipedia_api_url = f"https://en.wikipedia.org/w/api.php?action=query&titles={wiki_author_query}&prop=info&inprop=url&format=json"
-    try:
-        response = requests.get(wikipedia_api_url, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        pages = data.get("query", {}).get("pages", {})
-        if "-1" not in pages:
-            page_id = list(pages.keys())[0]
-            wikipedia_url = pages[page_id].get("fullurl", "")
-            return True, "Wikipedia page found", wikipedia_url
-        return False, "No Wikipedia page found", ""
-    except Exception as e:
-        return False, f"Wikipedia API error: {e}", ""
+        if item.get("domain", "") == "scholar.google.com":
+            count += 1
+    return count
 
 @st.cache_data(ttl=3600)
 def analyze_topical_serp(author: str, topic: str):
-    st.markdown("**DEBUG: analyze_topical_serp**")
-    author_only_query = f'"{author}"'
-    payloads = [{"keyword": author_only_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"}]
-    author_topic_query_str = ""
-    topic_query_str = ""
+    # Topic-based authority via separate calls
+    topical_authority_serp_count = 0
+    topical_authority_ratio = 0.0
+    ai_overview_summary = extract_ai_overview(author)
+    perspectives_domains = extract_perspectives(author)
+    # Topic signal (SERP count)
     if topic:
         author_topic_query_str = f'"{author}" AND "{topic}"'
         topic_query_str = f'"{topic}"'
-        if author_topic_query_str != author_only_query:
-            payloads.append({"keyword": author_topic_query_str, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"})
-        if topic_query_str != author_only_query and topic_query_str != author_topic_query_str:
-            payloads.append({"keyword": topic_query_str, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"})
-    seen_keywords = set()
-    unique_payloads = []
-    for p in payloads:
-        if p["keyword"] not in seen_keywords:
-            unique_payloads.append(p)
-            seen_keywords.add(p["keyword"])
-    batch_data_response = make_dataforseo_call(unique_payloads)
-    debug_section("DataForSEO batch_data_response", batch_data_response)
-    topical_authority_serp_count = 0
-    topical_authority_ratio = 0.0
-    ai_overview_summary = "N/A"
-    top_stories_mentions = []
-    topical_associated_domains = set()
-    perspectives_domains = set()
-    author_only_data_task = batch_data_response
-    author_only_items = extract_items_for_keyword(batch_data_response, author_only_query)
-    perspectives_domains = extract_perspectives_domains(author_only_items)
-    if topic:
+        payloads = [
+            {"keyword": author_topic_query_str, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"},
+            {"keyword": topic_query_str, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"}
+        ]
+        batch_data_response = make_dataforseo_call(payloads)
         topical_authority_serp_count = extract_se_results_count(batch_data_response, author_topic_query_str)
         total_topic_results_count = extract_se_results_count(batch_data_response, topic_query_str)
         if total_topic_results_count > 0:
             topical_authority_ratio = (topical_authority_serp_count / total_topic_results_count) * 100
-        author_topic_items = extract_items_for_keyword(batch_data_response, author_topic_query_str)
-        ai_overview_summary = extract_ai_overview(author_topic_items)
-        top_stories_mentions = extract_top_stories_mentions(author_topic_items, author)
-        topical_associated_domains = extract_topical_associated_domains(author_topic_items, author)
-    return (topical_authority_serp_count, topical_authority_ratio, ai_overview_summary,
-            sorted(list(set(top_stories_mentions))), sorted(list(topical_associated_domains)),
-            sorted(list(perspectives_domains)), author_only_data_task)
+    return (
+        topical_authority_serp_count, 
+        topical_authority_ratio, 
+        ai_overview_summary,
+        sorted(list(perspectives_domains)),
+    )
 
 @st.cache_data(ttl=3600)
 def get_author_associated_brands(author: str):
@@ -320,7 +198,7 @@ def get_author_associated_brands(author: str):
     data = make_dataforseo_call(payload)
     all_associated_domains = set()
     matched_uk_publishers = set()
-    items = extract_items_for_keyword(data, search_query)
+    items = extract_items_from_tasks(data, search_query)
     for item in items:
         if item.get("type") == "organic" and "domain" in item:
             domain = item["domain"]
@@ -329,13 +207,6 @@ def get_author_associated_brands(author: str):
             if domain in UK_PUBLISHER_DOMAINS:
                 matched_uk_publishers.add(domain)
     return sorted(list(all_associated_domains)), sorted(list(matched_uk_publishers))
-
-@st.cache_data(ttl=3600)
-def check_google_scholar_citations(author: str) -> int:
-    search_query = f'"{author}" "cited by" site:scholar.google.com'
-    payload = {"keyword": search_query, "language_code": "en", "location_name": "United Kingdom", "device": "desktop"}
-    data = make_dataforseo_call(payload)
-    return extract_se_results_count(data, search_query)
 
 def calculate_quality_score(
     has_kp: bool,
@@ -348,7 +219,6 @@ def calculate_quality_score(
     tiktok_followers: int,
     facebook_followers: int,
     general_matched_uk_publishers_count: int,
-    top_stories_mentions_count: int,
     topical_matched_uk_publishers_count: int,
     ai_overview_present: bool,
     has_perspectives: bool
@@ -366,8 +236,6 @@ def calculate_quality_score(
     score += general_matched_uk_publishers_score
     topical_matched_uk_publishers_score = min(topical_matched_uk_publishers_count * 2, 10)
     score += topical_matched_uk_publishers_score
-    if top_stories_mentions_count > 0:
-        score += min(top_stories_mentions_count * 3, 10)
     return max(0, min(score, 100))
 
 # --- Streamlit UI ---
@@ -407,21 +275,22 @@ with st.sidebar:
         if st.button("Analyze Single Author", use_container_width=True):
             if single_author_name:
                 with st.spinner(f"Analyzing '{single_author_name}'... This may take a moment due to API calls."):
-                    topical_authority_serp_count, topical_authority_ratio, ai_overview_summary, \
-                        top_stories_mentions, topical_associated_domains, perspectives_domains, \
-                        author_only_full_data = analyze_topical_serp(single_author_name, single_keyword_topic)
-                    kp_exists, kp_details = check_knowledge_panel_from_data(single_author_name, author_only_full_data)
-                    wiki_exists, wiki_details, wiki_url = check_wikipedia(single_author_name)
-                    all_associated_domains_general, matched_uk_publishers_general = get_author_associated_brands(single_author_name)
+                    wiki_exists, wiki_url = check_wikipedia(single_author_name)
+                    kp_exists, kp_title, kp_desc = check_knowledge_panel(single_author_name)
+                    perspectives_domains = extract_perspectives(single_author_name)
+                    ai_overview_summary = extract_ai_overview(single_author_name)
                     scholar_citations_count = check_google_scholar_citations(single_author_name)
+                    topical_authority_serp_count, topical_authority_ratio, topical_ai_overview, topical_perspectives_domains = analyze_topical_serp(single_author_name, single_keyword_topic)
+                    all_associated_domains_general, matched_uk_publishers_general = get_author_associated_brands(single_author_name)
                     has_perspectives = len(perspectives_domains) > 0
+                    has_topical_perspectives = len(topical_perspectives_domains) > 0
+                    topical_matched_uk_publishers_count = len([d for d in all_associated_domains_general if d in UK_PUBLISHER_DOMAINS])
                     quality_score = calculate_quality_score(
                         kp_exists, wiki_exists, topical_authority_ratio,
                         scholar_citations_count, single_linkedin_followers, single_x_followers,
                         single_instagram_followers, single_tiktok_followers, single_facebook_followers,
                         len(matched_uk_publishers_general),
-                        len(top_stories_mentions),
-                        len([d for d in topical_associated_domains if d in UK_PUBLISHER_DOMAINS]),
+                        topical_matched_uk_publishers_count,
                         ai_overview_summary != "N/A" and "content loading dynamically" not in ai_overview_summary,
                         has_perspectives
                     )
@@ -431,19 +300,17 @@ with st.sidebar:
                         "Author_URL": single_author_url,
                         "Quality_Score": quality_score,
                         "Has_Knowledge_Panel": "✅ Yes" if kp_exists else "❌ No",
-                        "KP_Details": kp_details,
+                        "KP_Title": kp_title if kp_exists else "N/A",
+                        "KP_Description": kp_desc if kp_exists else "N/A",
                         "Has_Wikipedia_Page": "✅ Yes" if wiki_exists else "❌ No",
-                        "Wikipedia_Details": wiki_details,
                         "Wikipedia_URL": wiki_url if wiki_exists else "N/A",
                         "AI_Overview_Summary": ai_overview_summary,
                         "Topical_Authority_SERP_Count": topical_authority_serp_count,
                         "Topical_Authority_Ratio": topical_authority_ratio,
-                        "Top_Stories_Mentions_Domains": ", ".join(top_stories_mentions) if top_stories_mentions else "None",
                         "Has_Perspectives": "✅ Yes" if has_perspectives else "❌ No",
                         "Perspectives_Domains": ", ".join(perspectives_domains) if perspectives_domains else "None",
                         "Scholar_Citations_Count": scholar_citations_count,
                         "General_Matched_UK_Publishers": ", ".join(matched_uk_publishers_general) if matched_uk_publishers_general else "None",
-                        "Topic_Associated_Domains": ", ".join(topical_associated_domains) if topical_associated_domains else "None",
                         "All_Associated_Domains_General": ", ".join(all_associated_domains_general),
                         "LinkedIn_Followers": single_linkedin_followers,
                         "X_Followers": single_x_followers,
@@ -496,7 +363,6 @@ st.markdown("---")
 
 if st.session_state['triggered_single_analysis'] and st.session_state['single_author_display_results'] is not None:
     st.subheader("Individual Author Analysis Results")
-    st.markdown("**DEBUG: Displaying single author result**")
     st.dataframe(st.session_state['single_author_display_results'], use_container_width=True)
     st.session_state['triggered_single_analysis'] = False
     st.session_state['single_author_display_results'] = None
@@ -520,22 +386,22 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
                 tiktok_followers = pd.to_numeric(row.get("TikTok_Followers", 0), errors='coerce').fillna(0).astype(int)
                 facebook_followers = pd.to_numeric(row.get("Facebook_Followers", 0), errors='coerce').fillna(0).astype(int)
                 author_url = str(row["Author_URL"]).strip() if "Author_URL" in bulk_data.columns and pd.notna(row["Author_URL"]) else ""
-                status_text.text(f"Processing: {author} ({index + 1}/{total_authors})")
-                topical_authority_serp_count, topical_authority_ratio, ai_overview_summary, \
-                    top_stories_mentions, topical_associated_domains, perspectives_domains, \
-                    author_only_full_data = analyze_topical_serp(author, keyword)
-                kp_exists, kp_details = check_knowledge_panel_from_data(author, author_only_full_data)
-                wiki_exists, wiki_details, wiki_url = check_wikipedia(author)
-                all_associated_domains_general, matched_uk_publishers_general = get_author_associated_brands(author)
+                wiki_exists, wiki_url = check_wikipedia(author)
+                kp_exists, kp_title, kp_desc = check_knowledge_panel(author)
+                perspectives_domains = extract_perspectives(author)
+                ai_overview_summary = extract_ai_overview(author)
                 scholar_citations_count = check_google_scholar_citations(author)
+                topical_authority_serp_count, topical_authority_ratio, topical_ai_overview, topical_perspectives_domains = analyze_topical_serp(author, keyword)
+                all_associated_domains_general, matched_uk_publishers_general = get_author_associated_brands(author)
                 has_perspectives = len(perspectives_domains) > 0
+                has_topical_perspectives = len(topical_perspectives_domains) > 0
+                topical_matched_uk_publishers_count = len([d for d in all_associated_domains_general if d in UK_PUBLISHER_DOMAINS])
                 quality_score = calculate_quality_score(
                     kp_exists, wiki_exists, topical_authority_ratio,
                     scholar_citations_count, linkedin_followers, x_followers,
                     instagram_followers, tiktok_followers, facebook_followers,
                     len(matched_uk_publishers_general),
-                    len(top_stories_mentions),
-                    len([d for d in topical_associated_domains if d in UK_PUBLISHER_DOMAINS]),
+                    topical_matched_uk_publishers_count,
                     ai_overview_summary != "N/A" and "content loading dynamically" not in ai_overview_summary,
                     has_perspectives
                 )
@@ -545,19 +411,17 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
                     "Author_URL": author_url,
                     "Quality_Score": quality_score,
                     "Has_Knowledge_Panel": "✅ Yes" if kp_exists else "❌ No",
-                    "KP_Details": kp_details,
+                    "KP_Title": kp_title if kp_exists else "N/A",
+                    "KP_Description": kp_desc if kp_exists else "N/A",
                     "Has_Wikipedia_Page": "✅ Yes" if wiki_exists else "❌ No",
-                    "Wikipedia_Details": wiki_details,
                     "Wikipedia_URL": wiki_url if wiki_exists else "N/A",
                     "AI_Overview_Summary": ai_overview_summary,
                     "Topical_Authority_SERP_Count": topical_authority_serp_count,
                     "Topical_Authority_Ratio": topical_authority_ratio,
-                    "Top_Stories_Mentions_Domains": ", ".join(top_stories_mentions) if top_stories_mentions else "None",
                     "Has_Perspectives": "✅ Yes" if has_perspectives else "❌ No",
                     "Perspectives_Domains": ", ".join(perspectives_domains) if perspectives_domains else "None",
                     "Scholar_Citations_Count": scholar_citations_count,
                     "General_Matched_UK_Publishers": ", ".join(matched_uk_publishers_general) if matched_uk_publishers_general else "None",
-                    "Topic_Associated_Domains": ", ".join(topical_associated_domains) if topical_associated_domains else "None",
                     "All_Associated_Domains_General": ", ".join(all_associated_domains_general),
                     "LinkedIn_Followers": linkedin_followers,
                     "X_Followers": x_followers,
