@@ -39,7 +39,7 @@ EXCLUDED_GENERIC_DOMAINS_REGEX = [
     r"arrse\.co\.uk", r"mumsnet\.com",
     r"ebay\.com", r"pangobooks\.com", r"gettyimages\.co\.uk",
     r"socialistworker\.co\.uk", r"newstatesman\.com", r"spectator\.co.uk",
-    r"echo-news\.co\.uk", r"times-series\.co.uk", r"thenational\.scot", r"oxfordmail\.co\.uk",
+    r"echo-news\.co\.uk", r"times-series\.co.uk", r"thenational\.scot", r"oxfordmail\.co.uk",
     r"moneyweek\.com", r"politeia\.co.uk", r"theweek\.com",
     r"innertemplelibrary\.com", r"san\.com", r"unherd\.com", r"padstudio\.co\.uk",
     r"deepsouthmedia\.co\.uk", r"dorsetchamber\.co\.uk", r"mattrossphysiotherapy\.co\.uk",
@@ -166,12 +166,10 @@ def check_google_scholar_citations(author):
 
 @st.cache_data(ttl=3600)
 def analyze_topical_serp(author: str, topic: str):
-    # Topic-based authority via separate calls
     topical_authority_serp_count = 0
     topical_authority_ratio = 0.0
     ai_overview_summary = extract_ai_overview(author)
     perspectives_domains = extract_perspectives(author)
-    # Topic signal (SERP count)
     if topic:
         author_topic_query_str = f'"{author}" AND "{topic}"'
         topic_query_str = f'"{topic}"'
