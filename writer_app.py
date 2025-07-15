@@ -39,7 +39,7 @@ EXCLUDED_GENERIC_DOMAINS_REGEX = [
     r"arrse\.co\.uk", r"mumsnet\.com",
     r"ebay\.com", r"pangobooks\.com", r"gettyimages\.co\.uk",
     r"socialistworker\.co\.uk", r"newstatesman\.com", r"spectator\.co.uk",
-    r"echo-news\.co\.uk", r"times-series\.co.uk", r"thenational\.scot", r"oxfordmail\.co\.uk",
+    r"echo-news\.co\.uk", r"times-series\.co.uk", r"thenational\.scot", r"oxfordmail\.co.uk",
     r"moneyweek\.com", r"politeia\.co.uk", r"theweek\.com",
     r"innertemplelibrary\.com", r"san\.com", r"unherd\.com", r"padstudio\.co\.uk",
     r"deepsouthmedia\.co\.uk", r"dorsetchamber\.co\.uk", r"mattrossphysiotherapy\.co\.uk",
@@ -70,9 +70,7 @@ def make_dataforseo_call(payload):
         return {"error": str(e)}
 
 def extract_items_from_tasks(response, keyword):
-    # Always return the full items array for the keyword, or fallback to any items
     try:
-        # Try to match keyword
         for task in response.get("tasks", []):
             task_kw = task.get("data", {}).get("keyword", "").replace('"','').strip().lower()
             if task_kw == keyword.replace('"','').strip().lower():
@@ -95,15 +93,12 @@ def extract_se_results_count(response, keyword):
             if task_kw == keyword.replace('"','').strip().lower():
                 for result in task.get("result", []):
                     return int(result.get("se_results_count", 0))
-        # fallback
         for task in response.get("tasks", []):
             for result in task.get("result", []):
                 return int(result.get("se_results_count", 0))
     except Exception as e:
         st.error(f"Error extracting se_results_count: {e}")
     return 0
-
-# --- Targeted Extraction Functions ---
 
 def check_wikipedia(author):
     keyword = f'"{author}" site:wikipedia.org'
@@ -120,7 +115,6 @@ def check_knowledge_panel(author):
     payload = { "keyword": keyword, "language_code": "en", "location_name": "United Kingdom", "device": "desktop" }
     response = make_dataforseo_call(payload)
     items = extract_items_from_tasks(response, keyword)
-    # --- FIX: Find first item with type: knowledge_graph
     for item in items:
         if item.get("type") == "knowledge_graph":
             return True, item.get("title"), item.get("description", "")
@@ -241,7 +235,13 @@ def calculate_quality_score(
     score += topical_matched_uk_publishers_score
     return max(0, min(score, 100))
 
-# --- Streamlit UI ---
+def safe_int(val):
+    try:
+        out = pd.to_numeric(val, errors='coerce')
+        return int(out) if not pd.isnull(out) and out is not None else 0
+    except Exception:
+        return 0
+
 st.title("✍️ The Telegraph Recommended: Author Quality Evaluator")
 st.markdown("---")
 st.markdown("""
@@ -383,11 +383,11 @@ elif st.session_state['triggered_bulk_analysis'] and st.session_state['bulk_data
             for index, row in bulk_data.iterrows():
                 author = str(row["Author"]).strip()
                 keyword = str(row["Keyword"]).strip() if "Keyword" in bulk_data.columns and pd.notna(row["Keyword"]) else ""
-                linkedin_followers = pd.to_numeric(row.get("LinkedIn_Followers", 0), errors='coerce').fillna(0).astype(int)
-                x_followers = pd.to_numeric(row.get("X_Followers", 0), errors='coerce').fillna(0).astype(int)
-                instagram_followers = pd.to_numeric(row.get("Instagram_Followers", 0), errors='coerce').fillna(0).astype(int)
-                tiktok_followers = pd.to_numeric(row.get("TikTok_Followers", 0), errors='coerce').fillna(0).astype(int)
-                facebook_followers = pd.to_numeric(row.get("Facebook_Followers", 0), errors='coerce').fillna(0).astype(int)
+                linkedin_followers = safe_int(row.get("LinkedIn_Followers", 0))
+                x_followers = safe_int(row.get("X_Followers", 0))
+                instagram_followers = safe_int(row.get("Instagram_Followers", 0))
+                tiktok_followers = safe_int(row.get("TikTok_Followers", 0))
+                facebook_followers = safe_int(row.get("Facebook_Followers", 0))
                 author_url = str(row["Author_URL"]).strip() if "Author_URL" in bulk_data.columns and pd.notna(row["Author_URL"]) else ""
                 wiki_exists, wiki_url = check_wikipedia(author)
                 kp_exists, kp_title, kp_desc = check_knowledge_panel(author)
