@@ -111,14 +111,40 @@ def extract_se_results_count(response, keyword):
         st.error(f"Error extracting se_results_count: {e}")
     return 0
 
+def normalize_title(name):
+    # Lowercase, replace spaces/underscores with underscores, remove punctuation/accents
+    import unicodedata
+    name = unicodedata.normalize("NFKD", name)
+    name = "".join([c for c in name if not unicodedata.combining(c)])
+    name = name.strip().lower().replace(" ", "_").replace("-", "_")
+    name = re.sub(r"[^\w_]", "", name)
+    return name
+
 def check_wikipedia(author):
     keyword = f'"{author}" site:wikipedia.org'
-    payload = { "keyword": keyword, "language_code": "en", "location_name": "United Kingdom", "device": "desktop" }
+    payload = { "keyword": keyword, "language_code": "en", "location_name": "United Kingdom", "device": "desktop", "limit": 20 }
     response = make_dataforseo_call(payload)
     items = extract_items_from_tasks(response, keyword)
+
+    author_norm = normalize_title(author)
+    # Optionally, "Lastname, Firstname"
+    parts = author.split()
+    author_norm_rev = ""
+    if len(parts) >= 2:
+        author_norm_rev = normalize_title(f"{parts[-1]}, {' '.join(parts[:-1])}")
+
     for item in items:
         if item.get("domain", "") == "en.wikipedia.org":
-            return True, item.get("url")
+            url = item.get("url", "")
+            m = re.search(r"wikipedia\.org/wiki/([^?#]+)", url)
+            if m:
+                slug = m.group(1)
+                slug_norm = normalize_title(slug.replace("_", " "))
+                # Accept e.g. 'harry_smith_(author)' as a match for 'harry_smith'
+                if (slug_norm == author_norm or 
+                    (author_norm_rev and slug_norm == author_norm_rev) or
+                    slug_norm.startswith(author_norm + "_")):
+                    return True, url
     return False, None
 
 def check_knowledge_panel(author):
