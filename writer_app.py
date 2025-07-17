@@ -15,7 +15,7 @@ except KeyError as e:
     st.error(f"Missing API secret: {e}. Please configure secrets in Streamlit Cloud dashboard.")
     st.stop()
 
-DATAFORSEO_ORGANIC_URL = "https://api.dataforseo.com/v3/serp/google/organic/live/regular"
+DATAFORSEO_ORGANIC_URL = "https://api.dataforseo.com/v3/serp/google/organic/live/advanced"
 
 UK_PUBLISHER_DOMAINS = [
     "thetimes.com", "theguardian.com", "bbc.co.uk", "express.co.uk",
